@@ -1,0 +1,46 @@
+name: GHAS Enablement Request
+description: Request to enable GitHub Advanced Security for repositories
+title: "[GHAS Request]: "
+labels: ["ghas-enablement"]
+assignees:
+  - octocat
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## GHAS Enablement Request
+        Please provide the following details to enable GHAS features on your repositories.
+  
+  - type: textarea
+    id: repositories
+    attributes:
+      label: Enterprise Server Repositories
+      description: Please list the repositories to enable GHAS Secret Scanning (one per line)
+      placeholder: |
+        org-name/repo-name-1
+        org-name/repo-name-2
+        org-name/repo-name-3
+    validations:
+      required: true
+      
+  - type: dropdown
+    id: ghas_features
+    attributes:
+      label: GHAS Features to Enable
+      multiple: true
+      options:
+        - Secret Scanning
+        - Code Scanning
+        - Dependabot Alerts
+      description: Select which GHAS features you want to enable
+    validations:
+      required: true
+
+  - type: input
+    id: enterprise_server
+    attributes:
+      label: GitHub Enterprise Server URL
+      description: The URL of your GitHub Enterprise Server
+      placeholder: https://github.example.com
+    validations:
+      required: true

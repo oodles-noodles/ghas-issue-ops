@@ -1,0 +1,250 @@
+name: GHAS Enablement Workflow
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  process-ghas-request:
+    if: contains(github.event.issue.labels.*.name, 'ghas-enablement')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      
+    env:
+      GH_ENTERPRISE_TOKEN: ${{ secrets.GH_ENTERPRISE_TOKEN }}
+      MIN_REMAINING_LICENSES: 100
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Parse issue body
+        id: parse-issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body;
+            
+            // Parse the repository list from the form submission
+            const repoListMatch = body.match(/### Enterprise Server Repositories([\s\S]*?)(?:###|$)/);
+            const repoListRaw = repoListMatch ? repoListMatch[1].trim() : '';
+            const repositories = repoListRaw.split('\n').map(repo => repo.trim()).filter(Boolean);
+            
+            // Get the enterprise server URL
+            const enterpriseUrlMatch = body.match(/### GitHub Enterprise Server URL\s*([^\n]+)/);
+            const enterpriseUrl = enterpriseUrlMatch ? enterpriseUrlMatch[1].trim() : '';
+            
+            // Get selected GHAS features
+            const featuresMatch = body.match(/### GHAS Features to Enable\s*([^\n]+)/);
+            const featuresRaw = featuresMatch ? featuresMatch[1].trim() : '';
+            const enableSecretScanning = featuresRaw.includes('Secret Scanning');
+            
+            core.setOutput('repositories', JSON.stringify(repositories));
+            core.setOutput('enterprise_url', enterpriseUrl);
+            core.setOutput('enable_secret_scanning', enableSecretScanning.toString());
+            
+            return { repositories, enterpriseUrl, enableSecretScanning };
+
+      - name: Check license availability
+        id: check-licenses
+        env:
+          ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
+        run: |
+          # Authenticate to GitHub Enterprise Server
+          echo "Checking license availability at $ENTERPRISE_URL"
+          gh auth login --hostname $ENTERPRISE_URL --with-token < <(echo $GH_ENTERPRISE_TOKEN)
+          
+          # Get total and used GHAS licenses
+          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/YOUR_ENTERPRISE_NAME/advanced-security" --hostname $ENTERPRISE_URL)
+          
+          TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.total_seats')
+          USED_LICENSES=$(echo $GHAS_DATA | jq '.seats_used')
+          AVAILABLE_LICENSES=$((TOTAL_LICENSES - USED_LICENSES))
+          
+          echo "Total GHAS licenses: $TOTAL_LICENSES"
+          echo "Used GHAS licenses: $USED_LICENSES"
+          echo "Available GHAS licenses: $AVAILABLE_LICENSES"
+          
+          echo "available_licenses=$AVAILABLE_LICENSES" >> $GITHUB_OUTPUT
+          echo "total_licenses=$TOTAL_LICENSES" >> $GITHUB_OUTPUT
+          echo "used_licenses=$USED_LICENSES" >> $GITHUB_OUTPUT
+          
+          if [ "$AVAILABLE_LICENSES" -gt "$MIN_REMAINING_LICENSES" ]; then
+            echo "has_enough_licenses=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_enough_licenses=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Analyze committers across all repositories
+        if: steps.parse-issue.outputs.enable_secret_scanning == 'true' && steps.check-licenses.outputs.has_enough_licenses == 'true'
+        id: analyze-committers
+        env:
+          ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
+          REPOSITORIES: ${{ steps.parse-issue.outputs.repositories }}
+          AVAILABLE_LICENSES: ${{ steps.check-licenses.outputs.available_licenses }}
+          MIN_REMAINING_LICENSES: ${{ env.MIN_REMAINING_LICENSES }}
+        run: |
+          repositories=$(echo $REPOSITORIES | jq -r '.[]')
+          declare -A all_new_committers
+          repo_analysis_results=()
+          enable_repos=()
+          all_repos=()
+          
+          # First pass - analyze all repositories and collect data
+          for repo in $repositories; do
+            echo "Analyzing repository: $repo"
+            IFS='/' read -r org repo_name <<< "$repo"
+            
+            # Add to all repositories list
+            all_repos+=("$repo")
+            
+            # Check recent committers (last 90 days)
+            ninety_days_ago=$(date -d "90 days ago" +%Y-%m-%d)
+            
+            # Get default branch
+            default_branch=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" --hostname $ENTERPRISE_URL | jq -r '.default_branch')
+            
+            # Get recent committers to the default branch
+            echo "Getting recent committers for $repo since $ninety_days_ago"
+            recent_committers=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/commits?since=$ninety_days_ago&sha=$default_branch&per_page=100" --hostname $ENTERPRISE_URL | jq -r '.[].author.login' | sort -u)
+            
+            
+            # Find new committers not already in GHAS
+            repo_new_committers=()
+            for committer in $recent_committers; do
+              if ! echo "$ghas_committers" | grep -q "^$committer$"; then
+                repo_new_committers+=("$committer")
+                all_new_committers["$committer"]=1
+              fi
+            done
+            
+            # Store analysis results for each repo
+            repo_analysis_results+=("{\"repo\":\"$repo\",\"new_committers\":[\"${repo_new_committers[*]}\"],\"count\":${#repo_new_committers[@]}}")
+          done
+          
+          # Count unique new committers across all repos
+          total_new_committers=${#all_new_committers[@]}
+          echo "Total unique new committers across all repositories: $total_new_committers"
+          
+          # Check if enabling would exceed license threshold
+          available_after_enabling=$((AVAILABLE_LICENSES - total_new_committers))
+          echo "Licenses that would be available after enabling: $available_after_enabling"
+          
+          if [ "$available_after_enabling" -lt "$MIN_REMAINING_LICENSES" ]; then
+            echo "⚠️ Enabling Secret Scanning would leave fewer than $MIN_REMAINING_LICENSES licenses available"
+            echo "can_enable=false" >> $GITHUB_OUTPUT
+            echo "new_committer_count=$total_new_committers" >> $GITHUB_OUTPUT
+            echo "available_after=$available_after_enabling" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Sufficient licenses available after enabling Secret Scanning"
+            echo "can_enable=true" >> $GITHUB_OUTPUT
+            echo "new_committer_count=$total_new_committers" >> $GITHUB_OUTPUT
+            echo "available_after=$available_after_enabling" >> $GITHUB_OUTPUT
+            
+            # Enable Secret Scanning for ALL repositories, regardless of recent committers
+            enable_repos=("${all_repos[@]}")
+          fi
+          
+          # Store repos to enable as JSON
+          echo "repos_to_enable=$(echo "${enable_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
+          
+          # Store all repos as JSON for reporting
+          echo "all_repos=$(echo "${all_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
+          
+          # Store detailed analysis for reporting
+          echo "repo_analysis=$(echo "${repo_analysis_results[@]}" | jq -s .)" >> $GITHUB_OUTPUT
+
+      - name: Enable Secret Scanning
+        if: steps.analyze-committers.outputs.can_enable == 'true'
+        env:
+          ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
+          REPOS_TO_ENABLE: ${{ steps.analyze-committers.outputs.repos_to_enable }}
+        run: |
+          repos=$(echo $REPOS_TO_ENABLE | jq -r '.[]')
+          
+          for repo in $repos; do
+            if [ -n "$repo" ]; then
+              echo "Enabling Secret Scanning for $repo"
+              IFS='/' read -r org repo_name <<< "$repo"
+              
+              gh api -X PUT -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/code-scanning/default-setup" \
+                --hostname $ENTERPRISE_URL \
+                -f state="configured" \
+                -f secret_scanning_push_protection="disabled" \
+                -f secret_scanning="enabled"
+              
+              echo "Secret Scanning enabled for $repo"
+            fi
+          done
+
+      - name: Update issue with results
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const enableSecretScanning = ${{ steps.parse-issue.outputs.enable_secret_scanning }};
+            const hasEnoughLicenses = ${{ steps.check-licenses.outputs.has_enough_licenses }};
+            const availableLicenses = ${{ steps.check-licenses.outputs.available_licenses }};
+            const totalLicenses = ${{ steps.check-licenses.outputs.total_licenses }};
+            const usedLicenses = ${{ steps.check-licenses.outputs.used_licenses }};
+            const repositories = JSON.parse('${{ steps.parse-issue.outputs.repositories }}');
+            
+            let comment = '## GHAS Enablement Results\n\n';
+            comment += `**License Summary:**\n`;
+            comment += `- Total GHAS licenses: ${totalLicenses}\n`;
+            comment += `- Used GHAS licenses: ${usedLicenses}\n`;
+            comment += `- Available GHAS licenses: ${availableLicenses}\n\n`;
+            
+            if (!enableSecretScanning) {
+              comment += '⚠️ Secret Scanning was not selected in the form, no action taken.\n';
+            } else if (!hasEnoughLicenses) {
+              comment += `⚠️ Not enough GHAS licenses available. Need to maintain at least ${process.env.MIN_REMAINING_LICENSES} unused licenses.\n`;
+            } else {
+              try {
+                const canEnable = ${{ steps.analyze-committers.outputs.can_enable }};
+                const newCommitterCount = ${{ steps.analyze-committers.outputs.new_committer_count }};
+                const availableAfter = ${{ steps.analyze-committers.outputs.available_after }};
+                const reposToEnable = JSON.parse('${{ steps.analyze-committers.outputs.repos_to_enable }}');
+                const repoAnalysis = JSON.parse('${{ steps.analyze-committers.outputs.repo_analysis }}');
+                
+                comment += `**Committer Analysis:**\n`;
+                comment += `- Total new unique committers identified: ${newCommitterCount}\n`;
+                comment += `- Licenses remaining after enablement: ${availableAfter}\n`;
+                comment += `- Minimum required remaining licenses: ${process.env.MIN_REMAINING_LICENSES}\n\n`;
+                
+                if (!canEnable) {
+                  comment += `⚠️ Cannot enable Secret Scanning - would leave fewer than ${process.env.MIN_REMAINING_LICENSES} licenses available.\n\n`;
+                } else {
+                  comment += `✅ Secret Scanning enabled for the following repositories:\n\n`;
+                  reposToEnable.forEach(repo => {
+                    if (repo) {
+                      comment += `- ${repo}\n`;
+                    }
+                  });
+                  
+                  if (reposToEnable.filter(Boolean).length === 0) {
+                    comment += `*No repositories had Secret Scanning enabled*\n`;
+                  }
+                  
+                  comment += `\n### Repository Details:\n\n`;
+                  repoAnalysis.forEach(analysis => {
+                    comment += `**${analysis.repo}**\n`;
+                    comment += `- New committers: ${analysis.count}\n`;
+                    comment += `- Status: Secret Scanning enabled\n`;
+                    comment += `\n`;
+                  });
+                }
+              } catch (error) {
+                comment += `⚠️ Error processing repository data: ${error.message}\n`;
+              }
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
