@@ -33,6 +33,10 @@ jobs:
             const repoListRaw = repoListMatch ? repoListMatch[1].trim() : '';
             const repositories = repoListRaw.split('\n').map(repo => repo.trim()).filter(Boolean);
             
+            // Get the enterprise name
+            const enterpriseNameMatch = body.match(/### GitHub Enterprise Name\s*([^\n]+)/);
+            const enterpriseName = enterpriseNameMatch ? enterpriseNameMatch[1].trim() : '';
+            
             // Get the enterprise server URL
             const enterpriseUrlMatch = body.match(/### GitHub Enterprise Server URL\s*([^\n]+)/);
             const enterpriseUrl = enterpriseUrlMatch ? enterpriseUrlMatch[1].trim() : '';
@@ -43,31 +47,30 @@ jobs:
             const enableSecretScanning = featuresRaw.includes('Secret Scanning');
             
             core.setOutput('repositories', JSON.stringify(repositories));
+            core.setOutput('enterprise_name', enterpriseName);
             core.setOutput('enterprise_url', enterpriseUrl);
             core.setOutput('enable_secret_scanning', enableSecretScanning.toString());
             
-            return { repositories, enterpriseUrl, enableSecretScanning };
+            return { repositories, enterpriseName, enterpriseUrl, enableSecretScanning };
 
       - name: Check license availability
         id: check-licenses
         env:
           ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
+          ENTERPRISE_NAME: ${{ steps.parse-issue.outputs.enterprise_name }}
         run: |
           # Authenticate to GitHub Enterprise Server
-          # echo "Authenticating to GitHub Enterprise Server at $ENTERPRISE_URL"
-          # gh auth login --hostname $ENTERPRISE_URL 
-          
-          
-          # Extract enterprise name from URL
-          ENTERPRISE_NAME=$(echo $ENTERPRISE_URL | sed -E 's/https?:\/\/([^\/]+)\/?/\1/')
-          echo "Enterprise name: $ENTERPRISE_NAME"
-
-          # Get total and used GHAS licenses
           echo "Checking license availability at $ENTERPRISE_URL"
-          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/settings/billing/advanced-security" --hostname $ENTERPRISE_URL)
+          gh auth login --hostname $ENTERPRISE_URL --with-token < <(echo $GH_ENTERPRISE_TOKEN)
           
-          TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.purchased_advanced_security_committers')
-          USED_LICENSES=$(echo $GHAS_DATA | jq '.total_advanced_security_committers')
+          # Use the enterprise name provided in the issue form
+          echo "Enterprise name: $ENTERPRISE_NAME"
+          
+          # Get total and used GHAS licenses
+          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/advanced-security" --hostname $ENTERPRISE_URL)
+          
+          TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.total_seats')
+          USED_LICENSES=$(echo $GHAS_DATA | jq '.seats_used')
           AVAILABLE_LICENSES=$((TOTAL_LICENSES - USED_LICENSES))
           
           echo "Total GHAS licenses: $TOTAL_LICENSES"
