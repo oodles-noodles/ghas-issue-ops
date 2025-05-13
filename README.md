@@ -12,11 +12,12 @@ A GitHub Actions workflow to automatically enable GitHub Advanced Security (GHAS
 3. The workflow automatically:
    - Parses the issue form data
    - Checks GHAS license availability (ensures at least 100 licenses remain available)
-   - For each repository:
-     - Identifies committers from the past 90 days on the default branch
-     - Compares with existing GHAS committers
-     - Enables Secret Scanning if new committers are found and license availability permits
-   - Updates the issue with results
+   - Analyzes all repositories collectively to determine total unique new committers
+   - Enables Secret Scanning on ALL specified repositories if:
+     - The total number of new unique committers would still leave at least 100 licenses available
+     - Secret Scanning was selected as a feature in the request form
+   - Secret Scanning is enabled on all repositories, even those without recent committers, to scan historical commits
+   - Updates the issue with detailed results including license availability before and after enablement
 
 ## Prerequisites
 
@@ -51,6 +52,15 @@ You can modify the workflow files to:
 - Adjust the permission checking logic
 - Modify the license threshold
 - Change the committer analysis period (currently 90 days)
+- Change the behavior to only enable on repositories with recent committers (currently enables on all repositories)
+
+## License Calculation Logic
+
+The workflow uses the following process to determine whether to enable Secret Scanning:
+1. Counts the total number of unique committers across all repositories (from the last 90 days)
+2. Checks if enabling Secret Scanning for these committers would leave at least 100 licenses available
+3. If sufficient licenses remain available, enables Secret Scanning on ALL repositories from the request
+4. If enabling would reduce licenses below the threshold, no repositories are enabled
 
 ## Troubleshooting
 
