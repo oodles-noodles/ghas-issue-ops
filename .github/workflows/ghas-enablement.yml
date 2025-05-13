@@ -58,16 +58,12 @@ jobs:
         env:
           ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
           ENTERPRISE_NAME: ${{ steps.parse-issue.outputs.enterprise_name }}
-        run: |
-          # Authenticate to GitHub Enterprise Server
-          echo "Checking license availability at $ENTERPRISE_URL"
-          gh auth login --hostname $ENTERPRISE_URL --with-token < <(echo $GH_ENTERPRISE_TOKEN)
-          
+        run: |         
           # Use the enterprise name provided in the issue form
           echo "Enterprise name: $ENTERPRISE_NAME"
           
           # Get total and used GHAS licenses
-          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/advanced-security" --hostname $ENTERPRISE_URL)
+          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/settings/billing/advanced-security" --hostname $ENTERPRISE_URL)
           
           TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.total_seats')
           USED_LICENSES=$(echo $GHAS_DATA | jq '.seats_used')
