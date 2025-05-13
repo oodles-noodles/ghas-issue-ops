@@ -39,7 +39,7 @@ jobs:
             
             // Get selected GHAS features
             const featuresMatch = body.match(/### GHAS Features to Enable\s*([^\n]+)/);
-            const featuresRaw = featuresMatch ? featuresMatch[1].trim() : '';
+            const featuresRaw = featuresMatch ? featuresRaw[1].trim() : '';
             const enableSecretScanning = featuresRaw.includes('Secret Scanning');
             
             core.setOutput('repositories', JSON.stringify(repositories));
@@ -57,8 +57,12 @@ jobs:
           echo "Checking license availability at $ENTERPRISE_URL"
           gh auth login --hostname $ENTERPRISE_URL --with-token < <(echo $GH_ENTERPRISE_TOKEN)
           
+          # Extract enterprise name from URL
+          ENTERPRISE_NAME=$(echo $ENTERPRISE_URL | sed -E 's/https?:\/\/([^\/]+)\/?/\1/')
+          echo "Enterprise name: $ENTERPRISE_NAME"
+
           # Get total and used GHAS licenses
-          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/YOUR_ENTERPRISE_NAME/advanced-security" --hostname $ENTERPRISE_URL)
+          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/advanced-security" --hostname $ENTERPRISE_URL)
           
           TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.total_seats')
           USED_LICENSES=$(echo $GHAS_DATA | jq '.seats_used')
