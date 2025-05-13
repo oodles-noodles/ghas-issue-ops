@@ -54,14 +54,16 @@ jobs:
           ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
         run: |
           # Authenticate to GitHub Enterprise Server
-          echo "Checking license availability at $ENTERPRISE_URL"
+          echo "Authenticating to GitHub Enterprise Server at $ENTERPRISE_URL"
           gh auth login --hostname $ENTERPRISE_URL --with-token < <(echo $GH_ENTERPRISE_TOKEN)
+          
           
           # Extract enterprise name from URL
           ENTERPRISE_NAME=$(echo $ENTERPRISE_URL | sed -E 's/https?:\/\/([^\/]+)\/?/\1/')
           echo "Enterprise name: $ENTERPRISE_NAME"
 
           # Get total and used GHAS licenses
+          echo "Checking license availability at $ENTERPRISE_URL"
           GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/settings/billing/advanced-security" --hostname $ENTERPRISE_URL)
           
           TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.purchased_advanced_security_committers')
