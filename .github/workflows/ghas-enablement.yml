@@ -55,7 +55,7 @@ jobs:
         run: |
           # Authenticate to GitHub Enterprise Server
           echo "Authenticating to GitHub Enterprise Server at $ENTERPRISE_URL"
-          gh auth login --hostname $ENTERPRISE_URL --with-token < <(echo $GH_ENTERPRISE_TOKEN)
+          gh auth login --hostname $ENTERPRISE_URL 
           
           
           # Extract enterprise name from URL
