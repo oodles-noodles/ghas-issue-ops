@@ -52,6 +52,7 @@ jobs:
         id: check-licenses
         env:
           ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
+          GH_ENTERPRISE_TOKEN: ${{ secrets.GH_ENTERPRISE_TOKEN }}
         run: |
           # Authenticate to GitHub Enterprise Server
           echo "Authenticating to GitHub Enterprise Server at $ENTERPRISE_URL"
@@ -89,6 +90,7 @@ jobs:
         id: analyze-committers
         env:
           ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
+          GH_ENTERPRISE_TOKEN: ${{ secrets.GH_ENTERPRISE_TOKEN }}
           REPOSITORIES: ${{ steps.parse-issue.outputs.repositories }}
           AVAILABLE_LICENSES: ${{ steps.check-licenses.outputs.available_licenses }}
           MIN_REMAINING_LICENSES: ${{ env.MIN_REMAINING_LICENSES }}
@@ -167,6 +169,7 @@ jobs:
         if: steps.analyze-committers.outputs.can_enable == 'true'
         env:
           ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
+          GH_ENTERPRISE_TOKEN: ${{ secrets.GH_ENTERPRISE_TOKEN }}
           REPOS_TO_ENABLE: ${{ steps.analyze-committers.outputs.repos_to_enable }}
         run: |
           repos=$(echo $REPOS_TO_ENABLE | jq -r '.[]')
