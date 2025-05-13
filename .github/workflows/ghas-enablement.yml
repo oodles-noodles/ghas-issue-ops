@@ -62,10 +62,10 @@ jobs:
           echo "Enterprise name: $ENTERPRISE_NAME"
 
           # Get total and used GHAS licenses
-          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/advanced-security" --hostname $ENTERPRISE_URL)
+          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/settings/billing/advanced-security" --hostname $ENTERPRISE_URL)
           
-          TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.total_seats')
-          USED_LICENSES=$(echo $GHAS_DATA | jq '.seats_used')
+          TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.purchased_advanced_security_committers')
+          USED_LICENSES=$(echo $GHAS_DATA | jq '.total_advanced_security_committers')
           AVAILABLE_LICENSES=$((TOTAL_LICENSES - USED_LICENSES))
           
           echo "Total GHAS licenses: $TOTAL_LICENSES"
