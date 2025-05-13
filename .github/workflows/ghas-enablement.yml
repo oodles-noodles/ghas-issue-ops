@@ -39,7 +39,7 @@ jobs:
             
             // Get selected GHAS features
             const featuresMatch = body.match(/### GHAS Features to Enable\s*([^\n]+)/);
-            const featuresRaw = featuresMatch ? featuresRaw[1].trim() : '';
+            const featuresRaw = featuresMatch ? featuresMatch[1].trim() : '';
             const enableSecretScanning = featuresRaw.includes('Secret Scanning');
             
             core.setOutput('repositories', JSON.stringify(repositories));
