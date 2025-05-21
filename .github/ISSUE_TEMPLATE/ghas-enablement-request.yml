@@ -14,12 +14,15 @@ body:
   - type: textarea
     id: repositories
     attributes:
-      label: Enterprise Server Repositories
-      description: Please list the repositories to enable GHAS Secret Scanning (one per line)
+      label: Repository URLs
+      description: |
+        Please provide the full URLs of the repositories to enable GHAS Secret Scanning (one per line).
+        Example:
+        https://github.example.com/org-name/repo-name-1
+        https://github.example.com/org-name/repo-name-2
       placeholder: |
-        org-name/repo-name-1
-        org-name/repo-name-2
-        org-name/repo-name-3
+        https://github.example.com/org-name/repo-name-1
+        https://github.example.com/org-name/repo-name-2
     validations:
       required: true
       
@@ -39,17 +42,38 @@ body:
   - type: input
     id: enterprise_name
     attributes:
-      label: GitHub Enterprise Name
-      description: The name of your GitHub Enterprise organization
+      label: GitHub Enterprise Name (optional)
+      description: The name of your GitHub Enterprise organization (auto-detected if left blank)
       placeholder: example-enterprise
     validations:
-      required: true
+      required: false
 
   - type: input
     id: enterprise_server
     attributes:
-      label: GitHub Enterprise Server URL
-      description: The URL of your GitHub Enterprise Server
+      label: GitHub Enterprise Server URL (optional)
+      description: The URL of your GitHub Enterprise Server (auto-detected if left blank)
       placeholder: https://github.example.com
     validations:
-      required: true
+      required: false
+      
+  - type: input
+    id: min_remaining_licenses
+    attributes:
+      label: Minimum Remaining Licenses (optional)
+      description: The minimum number of GHAS licenses to remain available after enablement (default is 1)
+      placeholder: "1"
+    validations:
+      required: false
+      
+  - type: dropdown
+    id: skip_license_check
+    attributes:
+      label: Skip License Check
+      description: Skip the GHAS license availability check (use with caution, only for special circumstances)
+      options:
+        - "No"
+        - "Yes"
+      default: 0
+    validations:
+      required: false

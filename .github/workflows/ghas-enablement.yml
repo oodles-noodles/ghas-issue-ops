@@ -11,245 +11,221 @@ jobs:
     permissions:
       contents: read
       issues: write
+    outputs:
+      matrix_json: ${{ steps.group_repos.outputs.matrix_json }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: npm install js-yaml
       
-    env:
-      GH_ENTERPRISE_TOKEN: ${{ secrets.GH_ENTERPRISE_TOKEN }}
-      MIN_REMAINING_LICENSES: 100
+      - name: Parse issue body
+        id: parse_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const helpers = require('../../scripts/ghas-helpers.js');
+            const issue = context.payload.issue;
+            
+            // Use helper function to parse the issue body
+            const parsedData = helpers.parseIssueBody(issue.body);
+            
+            // Set outputs for use in later steps
+            core.setOutput('repositories', JSON.stringify(parsedData.repositories));
+            core.setOutput('enable_secret_scanning', parsedData.features.enableSecretScanning);
+            core.setOutput('enable_code_scanning', parsedData.features.enableCodeScanning);
+            core.setOutput('enable_dependabot_alerts', parsedData.features.enableDependabotAlerts);
+            core.setOutput('min_remaining_licenses', parsedData.minRemainingLicenses);
+            core.setOutput('skip_license_check', parsedData.skipLicenseCheck);
+            
+            return parsedData;
+      
+      - name: Parse config.yaml and group repositories by GHES instance
+        id: group_repos
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const helpers = require('../../scripts/ghas-helpers.js');
+            
+            // Get repositories and feature flags from previous step
+            const repositoriesJson = '${{ steps.parse_issue.outputs.repositories }}';
+            const enableSecretScanning = ${{ steps.parse_issue.outputs.enable_secret_scanning }};
+            const enableCodeScanning = ${{ steps.parse_issue.outputs.enable_code_scanning }};
+            const enableDependabotAlerts = ${{ steps.parse_issue.outputs.enable_dependabot_alerts }};
+            const minRemainingLicenses = ${{ steps.parse_issue.outputs.min_remaining_licenses }};
+            const skipLicenseCheck = ${{ steps.parse_issue.outputs.skip_license_check }};
+            
+            // Use helper function to parse config and group repositories
+            const matrixItems = helpers.parseConfigAndGroupRepos(
+              repositoriesJson, 
+              enableSecretScanning, 
+              enableCodeScanning, 
+              enableDependabotAlerts, 
+              minRemainingLicenses
+            );
+            
+            // Add skipLicenseCheck to each matrix item
+            matrixItems.forEach(item => {
+              item.skip_license_check = skipLicenseCheck;
+            });
+            
+            // Save the matrix JSON for the next job
+            core.setOutput('matrix_json', JSON.stringify(matrixItems));
 
+  enable-ghas-for-instances:
+    needs: process-ghas-request
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.process-ghas-request.outputs.matrix_json) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Parse issue body
-        id: parse-issue
+      - name: Install dependencies
+        run: npm install js-yaml
+      
+      - name: Set dynamic token value
+        id: set_token
+        run: |
+          # Log hostname and auth var for debugging
+          echo "Repository hostname: ${{ matrix.hostname }}"
+          echo "Auth variable from matrix: ${{ matrix.auth_var }}"
+          
+          
+          # Set the token value dynamically using the auth_var
+          echo "GH_ENTERPRISE_TOKEN=${{ secrets[matrix.auth_var] }}" >> $GITHUB_ENV
+
+      
+      - name: Check license availability
+        id: check_licenses
         uses: actions/github-script@v7
+        env:
+          ENTERPRISE_URL: ${{ matrix.api_url }}
+          ENTERPRISE_NAME: ${{ matrix.instance_name }}
+          MIN_REMAINING_LICENSES: ${{ matrix.min_remaining_licenses }}
+          GH_ENTERPRISE_TOKEN: ${{ env.GH_ENTERPRISE_TOKEN }}
+          GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
         with:
           script: |
-            const issue = context.payload.issue;
-            const body = issue.body;
+            const helpers = require('../../scripts/ghas-helpers.js');
             
-            // Parse the repository list from the form submission
-            const repoListMatch = body.match(/### Enterprise Server Repositories([\s\S]*?)(?:###|$)/);
-            const repoListRaw = repoListMatch ? repoListMatch[1].trim() : '';
-            const repositories = repoListRaw.split('\n').map(repo => repo.trim()).filter(Boolean);
+            // Check if we should skip the license check
+            const skipCheck = ${{ matrix.skip_license_check }};
+            console.log(`Skip license check: ${skipCheck ? 'Yes' : 'No'}`);
             
-            // Get the enterprise name
-            const enterpriseNameMatch = body.match(/### GitHub Enterprise Name\s*([^\n]+)/);
-            const enterpriseName = enterpriseNameMatch ? enterpriseNameMatch[1].trim() : '';
+            // Use improved helper function that handles skipping internally
+            const licenseInfo = helpers.checkLicenseAvailability(process.env, skipCheck);
             
-            // Get the enterprise server URL
-            const enterpriseUrlMatch = body.match(/### GitHub Enterprise Server URL\s*([^\n]+)/);
-            const enterpriseUrl = enterpriseUrlMatch ? enterpriseUrlMatch[1].trim() : '';
-            
-            // Get selected GHAS features
-            const featuresMatch = body.match(/### GHAS Features to Enable\s*([^\n]+)/);
-            const featuresRaw = featuresMatch ? featuresMatch[1].trim() : '';
-            const enableSecretScanning = featuresRaw.includes('Secret Scanning');
-            
-            core.setOutput('repositories', JSON.stringify(repositories));
-            core.setOutput('enterprise_name', enterpriseName);
-            core.setOutput('enterprise_url', enterpriseUrl);
-            core.setOutput('enable_secret_scanning', enableSecretScanning.toString());
-            
-            return { repositories, enterpriseName, enterpriseUrl, enableSecretScanning };
-
-      - name: Check license availability
-        id: check-licenses
+            // Set outputs for use in later steps
+            core.setOutput('available_licenses', licenseInfo.availableLicenses);
+            core.setOutput('total_licenses', licenseInfo.totalLicenses);
+            core.setOutput('used_licenses', licenseInfo.usedLicenses);
+            core.setOutput('has_enough_licenses', licenseInfo.hasEnoughLicenses.toString());
+            core.setOutput('skip_license_check', licenseInfo.skipLicenseCheck);
+      
+      - name: Enable GHAS Features
+        id: enable_features
+        if: steps.check_licenses.outputs.has_enough_licenses == 'true'
         env:
-          ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
-          ENTERPRISE_NAME: ${{ steps.parse-issue.outputs.enterprise_name }}
-        run: |         
-          # Use the enterprise name provided in the issue form
-          echo "Enterprise name: $ENTERPRISE_NAME"
-          
-          # Get total and used GHAS licenses
-          GHAS_DATA=$(gh api -H "Accept: application/vnd.github+json" "/enterprises/$ENTERPRISE_NAME/settings/billing/advanced-security" --hostname $ENTERPRISE_URL)
-          
-          TOTAL_LICENSES=$(echo $GHAS_DATA | jq '.total_seats')
-          USED_LICENSES=$(echo $GHAS_DATA | jq '.seats_used')
-          AVAILABLE_LICENSES=$((TOTAL_LICENSES - USED_LICENSES))
-          
-          echo "Total GHAS licenses: $TOTAL_LICENSES"
-          echo "Used GHAS licenses: $USED_LICENSES"
-          echo "Available GHAS licenses: $AVAILABLE_LICENSES"
-          
-          echo "available_licenses=$AVAILABLE_LICENSES" >> $GITHUB_OUTPUT
-          echo "total_licenses=$TOTAL_LICENSES" >> $GITHUB_OUTPUT
-          echo "used_licenses=$USED_LICENSES" >> $GITHUB_OUTPUT
-          
-          if [ "$AVAILABLE_LICENSES" -gt "$MIN_REMAINING_LICENSES" ]; then
-            echo "has_enough_licenses=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_enough_licenses=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Analyze committers across all repositories
-        if: steps.parse-issue.outputs.enable_secret_scanning == 'true' && steps.check-licenses.outputs.has_enough_licenses == 'true'
-        id: analyze-committers
-        env:
-          ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
-          REPOSITORIES: ${{ steps.parse-issue.outputs.repositories }}
-          AVAILABLE_LICENSES: ${{ steps.check-licenses.outputs.available_licenses }}
-          MIN_REMAINING_LICENSES: ${{ env.MIN_REMAINING_LICENSES }}
+          ENTERPRISE_URL: ${{ matrix.api_url }}
+          REPOSITORIES: ${{ toJson(matrix.repositories) }}
+          ENABLE_SECRET_SCANNING: ${{ matrix.enable_secret_scanning }}
+          ENABLE_CODE_SCANNING: ${{ matrix.enable_code_scanning }}
+          ENABLE_DEPENDABOT_ALERTS: ${{ matrix.enable_dependabot_alerts }}
+          MIN_REMAINING_LICENSES: ${{ matrix.min_remaining_licenses }}
         run: |
-          repositories=$(echo $REPOSITORIES | jq -r '.[]')
-          declare -A all_new_committers
-          repo_analysis_results=()
-          enable_repos=()
-          all_repos=()
-          
-          # First pass - analyze all repositories and collect data
-          for repo in $repositories; do
-            echo "Analyzing repository: $repo"
-            IFS='/' read -r org repo_name <<< "$repo"
-            
-            # Add to all repositories list
-            all_repos+=("$repo")
-            
-            # Check recent committers (last 90 days)
-            ninety_days_ago=$(date -d "90 days ago" +%Y-%m-%d)
-            
-            # Get default branch
-            default_branch=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" --hostname $ENTERPRISE_URL | jq -r '.default_branch')
-            
-            # Get recent committers to the default branch
-            echo "Getting recent committers for $repo since $ninety_days_ago"
-            recent_committers=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/commits?since=$ninety_days_ago&sha=$default_branch&per_page=100" --hostname $ENTERPRISE_URL | jq -r '.[].author.login' | sort -u)
-            
-            
-            # Find new committers not already in GHAS
-            repo_new_committers=()
-            for committer in $recent_committers; do
-              if ! echo "$ghas_committers" | grep -q "^$committer$"; then
-                repo_new_committers+=("$committer")
-                all_new_committers["$committer"]=1
-              fi
-            done
-            
-            # Store analysis results for each repo
-            repo_analysis_results+=("{\"repo\":\"$repo\",\"new_committers\":[\"${repo_new_committers[*]}\"],\"count\":${#repo_new_committers[@]}}")
-          done
-          
-          # Count unique new committers across all repos
-          total_new_committers=${#all_new_committers[@]}
-          echo "Total unique new committers across all repositories: $total_new_committers"
-          
-          # Check if enabling would exceed license threshold
-          available_after_enabling=$((AVAILABLE_LICENSES - total_new_committers))
-          echo "Licenses that would be available after enabling: $available_after_enabling"
-          
-          if [ "$available_after_enabling" -lt "$MIN_REMAINING_LICENSES" ]; then
-            echo "⚠️ Enabling Secret Scanning would leave fewer than $MIN_REMAINING_LICENSES licenses available"
-            echo "can_enable=false" >> $GITHUB_OUTPUT
-            echo "new_committer_count=$total_new_committers" >> $GITHUB_OUTPUT
-            echo "available_after=$available_after_enabling" >> $GITHUB_OUTPUT
-          else
-            echo "✅ Sufficient licenses available after enabling Secret Scanning"
-            echo "can_enable=true" >> $GITHUB_OUTPUT
-            echo "new_committer_count=$total_new_committers" >> $GITHUB_OUTPUT
-            echo "available_after=$available_after_enabling" >> $GITHUB_OUTPUT
-            
-            # Enable Secret Scanning for ALL repositories, regardless of recent committers
-            enable_repos=("${all_repos[@]}")
+          if [[ "$ENABLE_SECRET_SCANNING" != "true" && "$ENABLE_CODE_SCANNING" != "true" && "$ENABLE_DEPENDABOT_ALERTS" != "true" ]]; then
+            echo "No GHAS features selected for enablement"
+            exit 0
           fi
           
-          # Store repos to enable as JSON
-          echo "repos_to_enable=$(echo "${enable_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
-          
-          # Store all repos as JSON for reporting
-          echo "all_repos=$(echo "${all_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
-          
-          # Store detailed analysis for reporting
-          echo "repo_analysis=$(echo "${repo_analysis_results[@]}" | jq -s .)" >> $GITHUB_OUTPUT
-
-      - name: Enable Secret Scanning
-        if: steps.analyze-committers.outputs.can_enable == 'true'
-        env:
-          ENTERPRISE_URL: ${{ steps.parse-issue.outputs.enterprise_url }}
-          REPOS_TO_ENABLE: ${{ steps.analyze-committers.outputs.repos_to_enable }}
-        run: |
-          repos=$(echo $REPOS_TO_ENABLE | jq -r '.[]')
+          echo "Enabling selected GHAS features for repositories"
+          repos=$(echo $REPOSITORIES | jq -r '.[]')
+          enabled_repos=()
           
           for repo in $repos; do
             if [ -n "$repo" ]; then
-              echo "Enabling Secret Scanning for $repo"
+              echo "Processing repository: $repo"
               IFS='/' read -r org repo_name <<< "$repo"
               
-              gh api -X PUT -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/code-scanning/default-setup" \
-                --hostname $ENTERPRISE_URL \
-                -f state="configured" \
-                -f secret_scanning_push_protection="disabled" \
-                -f secret_scanning="enabled"
+              # If Code Scanning selected, enable using default setup
+              # Note: Default setup also enables Secret Scanning, so we skip the separate Secret Scanning enablement
+              if [[ "$ENABLE_CODE_SCANNING" == "true" ]]; then
+                echo "Enabling Code Scanning with default setup for $repo"
+                gh api -X PUT -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/code-scanning/default-setup" \
+                  --hostname $ENTERPRISE_URL \
+                  -f state="configured"
+                  
+                enabled_repos+=("$repo")
+                continue # Skip individual feature enablement since default setup is comprehensive
+              fi
               
-              echo "Secret Scanning enabled for $repo"
+              # If Secret Scanning selected (and we're not using default setup)
+              if [[ "$ENABLE_SECRET_SCANNING" == "true" ]]; then
+                echo "Enabling Secret Scanning for $repo"
+                gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
+                  --hostname $ENTERPRISE_URL \
+                  -f security_and_analysis="{\"secret_scanning\":{\"status\":\"enabled\"}}"
+              fi
+              
+              # If Dependabot Alerts selected
+              if [[ "$ENABLE_DEPENDABOT_ALERTS" == "true" ]]; then
+                echo "Enabling Dependabot Alerts for $repo"
+                gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
+                  --hostname $ENTERPRISE_URL \
+                  -f security_and_analysis="{\"vulnerability_alerts\":{\"status\":\"enabled\"}}"
+              fi
+              
+              enabled_repos+=("$repo")
+              echo "GHAS features enabled for $repo"
             fi
           done
-
+          
+          # Store enabled repos for reporting
+          echo "enabled_repos=$(echo "${enabled_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
+      
       - name: Update issue with results
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const enableSecretScanning = ${{ steps.parse-issue.outputs.enable_secret_scanning }};
-            const hasEnoughLicenses = ${{ steps.check-licenses.outputs.has_enough_licenses }};
-            const availableLicenses = ${{ steps.check-licenses.outputs.available_licenses }};
-            const totalLicenses = ${{ steps.check-licenses.outputs.total_licenses }};
-            const usedLicenses = ${{ steps.check-licenses.outputs.used_licenses }};
-            const repositories = JSON.parse('${{ steps.parse-issue.outputs.repositories }}');
+            const helpers = require('../../scripts/ghas-helpers.js');
             
-            let comment = '## GHAS Enablement Results\n\n';
-            comment += `**License Summary:**\n`;
-            comment += `- Total GHAS licenses: ${totalLicenses}\n`;
-            comment += `- Used GHAS licenses: ${usedLicenses}\n`;
-            comment += `- Available GHAS licenses: ${availableLicenses}\n\n`;
+            // All license check information comes from single step now
+            const hasEnoughLicenses = '${{ steps.check_licenses.outputs.has_enough_licenses }}' === 'true';
+            const skipLicenseCheck = '${{ steps.check_licenses.outputs.skip_license_check }}' === 'true';
             
-            if (!enableSecretScanning) {
-              comment += '⚠️ Secret Scanning was not selected in the form, no action taken.\n';
-            } else if (!hasEnoughLicenses) {
-              comment += `⚠️ Not enough GHAS licenses available. Need to maintain at least ${process.env.MIN_REMAINING_LICENSES} unused licenses.\n`;
-            } else {
-              try {
-                const canEnable = ${{ steps.analyze-committers.outputs.can_enable }};
-                const newCommitterCount = ${{ steps.analyze-committers.outputs.new_committer_count }};
-                const availableAfter = ${{ steps.analyze-committers.outputs.available_after }};
-                const reposToEnable = JSON.parse('${{ steps.analyze-committers.outputs.repos_to_enable }}');
-                const repoAnalysis = JSON.parse('${{ steps.analyze-committers.outputs.repo_analysis }}');
-                
-                comment += `**Committer Analysis:**\n`;
-                comment += `- Total new unique committers identified: ${newCommitterCount}\n`;
-                comment += `- Licenses remaining after enablement: ${availableAfter}\n`;
-                comment += `- Minimum required remaining licenses: ${process.env.MIN_REMAINING_LICENSES}\n\n`;
-                
-                if (!canEnable) {
-                  comment += `⚠️ Cannot enable Secret Scanning - would leave fewer than ${process.env.MIN_REMAINING_LICENSES} licenses available.\n\n`;
-                } else {
-                  comment += `✅ Secret Scanning enabled for the following repositories:\n\n`;
-                  reposToEnable.forEach(repo => {
-                    if (repo) {
-                      comment += `- ${repo}\n`;
-                    }
-                  });
-                  
-                  if (reposToEnable.filter(Boolean).length === 0) {
-                    comment += `*No repositories had Secret Scanning enabled*\n`;
-                  }
-                  
-                  comment += `\n### Repository Details:\n\n`;
-                  repoAnalysis.forEach(analysis => {
-                    comment += `**${analysis.repo}**\n`;
-                    comment += `- New committers: ${analysis.count}\n`;
-                    comment += `- Status: Secret Scanning enabled\n`;
-                    comment += `\n`;
-                  });
-                }
-              } catch (error) {
-                comment += `⚠️ Error processing repository data: ${error.message}\n`;
-              }
-            }
+            // Prepare parameters for comment creation
+            const params = {
+              enableSecretScanning: ${{ matrix.enable_secret_scanning }},
+              enableCodeScanning: ${{ matrix.enable_code_scanning }},
+              enableDependabotAlerts: ${{ matrix.enable_dependabot_alerts }},
+              repositories: ${{ toJson(matrix.repositories) }},
+              hasEnoughLicenses: hasEnoughLicenses,
+              availableLicenses: parseInt(${{ steps.check_licenses.outputs.available_licenses }}),
+              totalLicenses: parseInt(${{ steps.check_licenses.outputs.total_licenses }}),
+              usedLicenses: parseInt(${{ steps.check_licenses.outputs.used_licenses }}),
+              skipLicenseCheck: skipLicenseCheck,
+              minRemainingLicenses: ${{ matrix.min_remaining_licenses }},
+              hostname: "${{ matrix.hostname }}",
+              instanceName: "${{ matrix.instance_name }}"
+            };
             
+            // Create comment text
+            const comment = helpers.createResultsComment(params);
+            
+            // Post comment to the issue
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: comment
             });
+            
+            // If not enough licenses, exit early
+            if (!params.hasEnoughLicenses) {
+              return;
+            }
+
