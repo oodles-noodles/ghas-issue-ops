@@ -1,14 +1,14 @@
 # Configuration for GHES instances
 ghes_instances:
-  - name: 'ghes-qa'
-    api_url: 'https://api.ghes-qa.example.com/api/v3' 
-    auth_var: 'GHES_API_TOKEN_QA'  
-  - name: 'ghes-prod'
-    api_url: 'https://api.ghes-prod.example.com/api/v3'
-    auth_var: 'GHES_API_TOKEN_PROD'
+  - name: 'github'
+    api_url: 'https://david-wiggs-06ba367f2376fa51c.qaboot.net/api/v3' 
+    auth_var: 'GHES_API_TOKEN_1'  
+  - name: 'github'
+    api_url: 'https://david-wiggs-0bca54adfdef0a2fa.qaboot.net/api/v3'
+    auth_var: 'GHES_API_TOKEN_2'
 
 # GitHub Enterprise Cloud configuration for license management
 ghec:
-  name: 'ghec-instance'
+  name: 'avocado-corp'
   api_url: 'https://api.github.com'
   auth_var: 'GH_ENTERPRISE_TOKEN_CLOUD'
