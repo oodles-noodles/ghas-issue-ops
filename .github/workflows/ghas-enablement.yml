@@ -143,7 +143,19 @@ jobs:
           for repo in $repos; do
             if [ -n "$repo" ]; then
               echo "Processing repository: $repo"
-              IFS='/' read -r org repo_name <<< "$repo"
+              # Extract the org and repo_name from the URL path
+              # Format: https://hostname/org/repo or http://hostname/org/repo
+              # Use sed to extract just org/repo part from the full URL
+              repo_path=$(echo "$repo" | sed -E 's|https?://[^/]+/(.+)|\1|')
+              IFS='/' read -r org repo_name <<< "$repo_path"
+              
+              # Validate that we have both org and repo_name
+              if [[ -z "$org" || -z "$repo_name" ]]; then
+                echo "Error: Could not extract organization and repository name from $repo"
+                continue
+              fi
+              
+              echo "Extracted org: $org, repo_name: $repo_name from $repo"
               
               # If Code Scanning selected, enable using default setup
               # Note: Default setup also enables Secret Scanning, so we skip the separate Secret Scanning enablement
