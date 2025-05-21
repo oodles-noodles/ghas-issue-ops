@@ -133,6 +133,10 @@ jobs:
           fi
           
           echo "Enabling selected GHAS features for repositories"
+          # Extract hostname from ENTERPRISE_URL for GitHub CLI
+          HOSTNAME=$(echo $ENTERPRISE_URL | sed -E 's|https?://([^/]+)/.*|\1|' | sed 's/api\.//')
+          echo "Using hostname: $HOSTNAME"
+          
           repos=$(echo $REPOSITORIES | jq -r '.[]')
           enabled_repos=()
           
@@ -146,7 +150,7 @@ jobs:
               if [[ "$ENABLE_CODE_SCANNING" == "true" ]]; then
                 echo "Enabling Code Scanning with default setup for $repo"
                 gh api -X PUT -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/code-scanning/default-setup" \
-                  --hostname $ENTERPRISE_URL \
+                  --hostname $HOSTNAME \
                   -f state="configured"
                   
                 enabled_repos+=("$repo")
@@ -157,7 +161,7 @@ jobs:
               if [[ "$ENABLE_SECRET_SCANNING" == "true" ]]; then
                 echo "Enabling Secret Scanning for $repo"
                 gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
-                  --hostname $ENTERPRISE_URL \
+                  --hostname $HOSTNAME \
                   -f security_and_analysis="{\"secret_scanning\":{\"status\":\"enabled\"}}"
               fi
               
@@ -165,7 +169,7 @@ jobs:
               if [[ "$ENABLE_DEPENDABOT_ALERTS" == "true" ]]; then
                 echo "Enabling Dependabot Alerts for $repo"
                 gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
-                  --hostname $ENTERPRISE_URL \
+                  --hostname $HOSTNAME \
                   -f security_and_analysis="{\"vulnerability_alerts\":{\"status\":\"enabled\"}}"
               fi
               

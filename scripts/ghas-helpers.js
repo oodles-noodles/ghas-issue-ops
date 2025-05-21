@@ -163,7 +163,9 @@ function checkLicenseAvailability(env, skipCheck = false) {
   const ghecToken = env.GH_ENTERPRISE_TOKEN;
   
   // Get total and used GHAS licenses from GHEC API
-  const cmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecApiUrl}"`;
+  // Extract hostname from ghecApiUrl for GitHub CLI
+  const ghecHostname = new URL(ghecApiUrl).hostname.replace(/^api\./, '');
+  const cmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
   const ghasDataRaw = execSync(cmd, { 
     env: { ...env, GH_TOKEN: ghecToken },
     encoding: 'utf8'
