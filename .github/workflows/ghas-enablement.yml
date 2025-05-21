@@ -241,8 +241,26 @@ jobs:
             const parsedData = helpers.parseIssueBody(issue.body);
             const originalRepos = parsedData.repositories;
             
-            // Identify which inputs were org URLs
-            const orgUrls = originalRepos.filter(url => helpers.isOrganizationUrl(url));
+            // Get the current hostname for filtering
+            const currentHostname = "${{ matrix.hostname }}";
+            
+            // Identify which inputs were org URLs and filter to only those for this enterprise
+            const orgUrls = originalRepos.filter(url => {
+              try {
+                // Check if it's an org URL
+                if (helpers.isOrganizationUrl(url)) {
+                  // Extract hostname and check if it matches current enterprise
+                  const urlObj = new URL(url);
+                  return urlObj.hostname === currentHostname;
+                }
+                return false;
+              } catch (error) {
+                console.error(`Invalid URL: ${url}`, error.message);
+                return false;
+              }
+            });
+            
+            console.log(`Found ${orgUrls.length} organization URLs for hostname ${currentHostname}`);
             
             // Prepare parameters for comment creation
             const params = {
@@ -256,11 +274,11 @@ jobs:
               usedLicenses: parseInt(${{ steps.check_licenses.outputs.used_licenses }}),
               skipLicenseCheck: skipLicenseCheck,
               minRemainingLicenses: ${{ matrix.min_remaining_licenses }},
-              hostname: "${{ matrix.hostname }}",
+              hostname: currentHostname,
               instanceName: "${{ matrix.instance_name }}"
             };
             
-            // Add org URLs to params if any were detected
+            // Add filtered org URLs to params if any were detected
             if (orgUrls.length > 0) {
               params.organizationUrls = orgUrls;
             }
