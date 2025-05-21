@@ -120,13 +120,13 @@ jobs:
         if: steps.check_licenses.outputs.has_enough_licenses == 'true'
         env:
           ENTERPRISE_URL: ${{ matrix.api_url }}
-          GH_ENTERPRISE_TOKEN: ${{ secrets[matrix.auth_var] }}
           REPOSITORIES: ${{ toJson(matrix.repositories) }}
           ENABLE_SECRET_SCANNING: ${{ matrix.enable_secret_scanning }}
           ENABLE_CODE_SCANNING: ${{ matrix.enable_code_scanning }}
           ENABLE_DEPENDABOT_ALERTS: ${{ matrix.enable_dependabot_alerts }}
           MIN_REMAINING_LICENSES: ${{ matrix.min_remaining_licenses }}
         run: |
+          export GH_ENTERPRISE_TOKEN="${{ secrets[matrix.auth_var] }}"
           if [[ "$ENABLE_SECRET_SCANNING" != "true" && "$ENABLE_CODE_SCANNING" != "true" && "$ENABLE_DEPENDABOT_ALERTS" != "true" ]]; then
             echo "No GHAS features selected for enablement"
             exit 0
