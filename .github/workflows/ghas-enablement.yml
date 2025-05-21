@@ -163,7 +163,7 @@ jobs:
                 echo "Enabling Code Scanning with default setup for $repo"
                 gh api -X PUT -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/code-scanning/default-setup" \
                   --hostname $HOSTNAME \
-                  -f state="configured"
+                  -f 'state=configured'
                   
                 enabled_repos+=("$repo")
                 continue # Skip individual feature enablement since default setup is comprehensive
@@ -174,7 +174,7 @@ jobs:
                 echo "Enabling Secret Scanning for $repo"
                 gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
                   --hostname $HOSTNAME \
-                  -f security_and_analysis="{\"secret_scanning\":{\"status\":\"enabled\"}}"
+                  -f 'security_and_analysis={"secret_scanning":{"status":"enabled"}}'
               fi
               
               # If Dependabot Alerts selected
@@ -182,7 +182,7 @@ jobs:
                 echo "Enabling Dependabot Alerts for $repo"
                 gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
                   --hostname $HOSTNAME \
-                  -f security_and_analysis="{\"vulnerability_alerts\":{\"status\":\"enabled\"}}"
+                  -f 'security_and_analysis={"vulnerability_alerts":{"status":"enabled"}}'
               fi
               
               enabled_repos+=("$repo")
