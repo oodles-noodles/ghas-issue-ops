@@ -161,9 +161,10 @@ jobs:
               # Note: Default setup also enables Secret Scanning, so we skip the separate Secret Scanning enablement
               if [[ "$ENABLE_CODE_SCANNING" == "true" ]]; then
                 echo "Enabling Code Scanning with default setup for $repo"
-                gh api -X PUT -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name/code-scanning/default-setup" \
+                echo '{"state":"configured"}' | \
+                gh api -X PUT -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name/code-scanning/default-setup" \
                   --hostname $HOSTNAME \
-                  -f state='configured'
+                  --input -
                   
                 enabled_repos+=("$repo")
                 continue # Skip individual feature enablement since default setup is comprehensive
@@ -172,17 +173,19 @@ jobs:
               # If Secret Scanning selected (and we're not using default setup)
               if [[ "$ENABLE_SECRET_SCANNING" == "true" ]]; then
                 echo "Enabling Secret Scanning for $repo"
-                gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
+                echo '{"security_and_analysis":{"secret_scanning":{"status":"enabled"}}}' | \
+                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
                   --hostname $HOSTNAME \
-                  -f security_and_analysis='{"secret_scanning":{"status":"enabled"}}'
+                  --input -
               fi
               
               # If Dependabot Alerts selected
               if [[ "$ENABLE_DEPENDABOT_ALERTS" == "true" ]]; then
                 echo "Enabling Dependabot Alerts for $repo"
-                gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
+                echo '{"security_and_analysis":{"vulnerability_alerts":{"status":"enabled"}}}' | \
+                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
                   --hostname $HOSTNAME \
-                  -f security_and_analysis='{"vulnerability_alerts":{"status":"enabled"}}'
+                  --input -
               fi
               
               enabled_repos+=("$repo")
