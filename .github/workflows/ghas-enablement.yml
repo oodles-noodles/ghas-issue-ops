@@ -113,15 +113,44 @@ jobs:
             const skipCheck = ${{ matrix.skip_license_check }};
             console.log(`Skip license check: ${skipCheck ? 'Yes' : 'No'}`);
             
-            // Use improved helper function that handles skipping internally
-            const licenseInfo = helpers.checkLicenseAvailability(process.env, skipCheck);
+            // Get the list of repositories to check for license impact
+            const repositories = ${{ toJson(matrix.repositories) }};
+            
+            // Use improved helper function that handles skipping internally and performs committer analysis
+            const licenseInfo = helpers.checkLicenseAvailability(process.env, skipCheck, repositories);
+            
+            // Create a license info object for sharing with subsequent steps
+            const licenseInfoForSharing = {
+              availableLicenses: licenseInfo.availableLicenses,
+              totalLicenses: licenseInfo.totalLicenses,
+              usedLicenses: licenseInfo.usedLicenses,
+              newCommitters: licenseInfo.newCommitters || 0,
+              estimatedLicensesNeeded: licenseInfo.estimatedLicensesNeeded || 0,
+              hasEnoughLicenses: licenseInfo.hasEnoughLicenses,
+              skipLicenseCheck: licenseInfo.skipLicenseCheck
+            };
+            
+            // Pass the newCommittersList if available
+            if (licenseInfo.newCommittersList) {
+              licenseInfoForSharing.newCommittersList = licenseInfo.newCommittersList;
+            }
+            
+            // Store the license info for the update_issue step
+            core.exportVariable('LICENSE_INFO_JSON', JSON.stringify(licenseInfoForSharing));
             
             // Set outputs for use in later steps
             core.setOutput('available_licenses', licenseInfo.availableLicenses);
             core.setOutput('total_licenses', licenseInfo.totalLicenses);
             core.setOutput('used_licenses', licenseInfo.usedLicenses);
+            core.setOutput('new_committers', licenseInfo.newCommitters);
+            core.setOutput('estimated_licenses_needed', licenseInfo.estimatedLicensesNeeded);
             core.setOutput('has_enough_licenses', licenseInfo.hasEnoughLicenses.toString());
             core.setOutput('skip_license_check', licenseInfo.skipLicenseCheck);
+            
+            // Output the list of new committers if available
+            if (licenseInfo.newCommittersList && licenseInfo.newCommittersList.length > 0) {
+              core.setOutput('new_committers_list', JSON.stringify(licenseInfo.newCommittersList));
+            }
       
       - name: Enable GHAS Features
         id: enable_features
@@ -272,11 +301,23 @@ jobs:
               availableLicenses: parseInt(${{ steps.check_licenses.outputs.available_licenses }}),
               totalLicenses: parseInt(${{ steps.check_licenses.outputs.total_licenses }}),
               usedLicenses: parseInt(${{ steps.check_licenses.outputs.used_licenses }}),
+              newCommitters: parseInt(${{ steps.check_licenses.outputs.new_committers }} || '0'),
+              estimatedLicensesNeeded: parseInt(${{ steps.check_licenses.outputs.estimated_licenses_needed }} || '0'),
               skipLicenseCheck: skipLicenseCheck,
               minRemainingLicenses: ${{ matrix.min_remaining_licenses }},
               hostname: currentHostname,
               instanceName: "${{ matrix.instance_name }}"
             };
+            
+            // Add new committers list if available
+            const newCommittersListStr = '${{ steps.check_licenses.outputs.new_committers_list }}';
+            if (newCommittersListStr) {
+              try {
+                params.newCommittersList = JSON.parse(newCommittersListStr);
+              } catch (error) {
+                console.error('Error parsing new committers list:', error.message);
+              }
+            }
             
             // Add filtered org URLs to params if any were detected
             if (orgUrls.length > 0) {

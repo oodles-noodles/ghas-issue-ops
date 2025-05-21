@@ -4,6 +4,110 @@ const yaml = require('js-yaml');
 const { execSync } = require('child_process');
 
 /**
+ * Fetches unique committers from a repository over the last 90 days
+ * @param {string} repoUrl - Repository URL
+ * @param {string} token - Authentication token
+ * @returns {Array} Array of committer emails
+ */
+function fetchRepoCommitters(repoUrl, token) {
+  try {
+    // Parse the URL to extract components
+    const url = new URL(repoUrl);
+    const hostname = url.hostname;
+    
+    // Extract org/repo from path
+    const pathParts = url.pathname.replace(/^\//, '').split('/');
+    if (pathParts.length < 2) {
+      console.error(`Invalid repository URL format: ${repoUrl}`);
+      return [];
+    }
+    
+    const org = pathParts[0];
+    const repo = pathParts[1];
+    
+    console.log(`Fetching committers for repository: ${org}/${repo} from ${hostname}`);
+    
+    // Calculate date 90 days ago for commit search
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const sinceDate = ninetyDaysAgo.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    // Use GitHub CLI to fetch commits from the last 90 days
+    // Note: This will paginate to get up to 1000 commits from the last 90 days
+    const cmd = `gh api -H "Accept: application/vnd.github+json" "/repos/${org}/${repo}/commits?since=${sinceDate}&per_page=100" --hostname "${hostname}" --paginate`;
+    
+    try {
+      const commitsDataRaw = execSync(cmd, {
+        env: { ...process.env, GH_TOKEN: token },
+        encoding: 'utf8'
+      });
+      
+      // Parse commits and extract unique committer emails
+      const commits = JSON.parse(commitsDataRaw);
+      const committers = new Set();
+      
+      if (Array.isArray(commits)) {
+        commits.forEach(commit => {
+          if (commit.commit && commit.commit.author && commit.commit.author.email) {
+            committers.add(commit.commit.author.email.toLowerCase());
+          }
+          if (commit.commit && commit.commit.committer && commit.commit.committer.email) {
+            committers.add(commit.commit.committer.email.toLowerCase());
+          }
+        });
+      } else {
+        console.error(`Invalid response format when fetching commits for ${org}/${repo}`);
+      }
+      
+      return Array.from(committers);
+    } catch (error) {
+      if (error.message.includes('404')) {
+        console.error(`Repository not found or no access: ${org}/${repo}`);
+      } else if (error.message.includes('403')) {
+        console.error(`Permission denied when fetching commits for ${org}/${repo}`);
+      } else {
+        console.error(`Error fetching commits for ${org}/${repo}:`, error.message);
+      }
+      return [];
+    }
+  } catch (error) {
+    console.error(`Error processing repo URL ${repoUrl}:`, error.message);
+    return [];
+  }
+}
+
+/**
+ * Fetch all unique committers across multiple repositories over the last 90 days
+ * @param {Array} repositories - Array of repository URLs
+ * @param {Object} tokensByHostname - Map of hostnames to authentication tokens
+ * @returns {Array} Array of unique committer emails
+ */
+function getAllUniqueCommitters(repositories, tokensByHostname) {
+  const allCommitters = new Set();
+  
+  for (const repoUrl of repositories) {
+    try {
+      const hostname = new URL(repoUrl).hostname;
+      const token = tokensByHostname[hostname];
+      
+      if (!token) {
+        console.error(`No token found for hostname ${hostname}`);
+        continue;
+      }
+      
+      const repoCommitters = fetchRepoCommitters(repoUrl, token);
+      repoCommitters.forEach(committer => allCommitters.add(committer));
+      
+      console.log(`Found ${repoCommitters.length} committers in ${repoUrl}`);
+    } catch (error) {
+      console.error(`Error processing repository ${repoUrl}:`, error.message);
+    }
+  }
+  
+  return Array.from(allCommitters);
+}
+
+/**
  * Fetches all repositories for a given organization URL
  * @param {string} orgUrl - The URL of the organization
  * @param {string} token - The token for authentication
@@ -255,9 +359,20 @@ function getTokenValue(tokenName, secrets) {
  * Checks GHAS license availability or returns default values if skipping check
  * @param {Object} env - Environment variables
  * @param {boolean} skipCheck - Whether to skip the license check
- * @returns {Object} License information and availability status
+ * @param {Array} repositories - List of repositories to enable GHAS for (optional)
+ * @returns {Object} License information and availability status including:
+ *   - totalLicenses: Total number of GHAS licenses
+ *   - usedLicenses: Number of licenses currently in use
+ *   - availableLicenses: Number of licenses available after considering new committers
+ *   - minRemainingLicenses: Minimum number of licenses that must remain unused
+ *   - hasEnoughLicenses: Boolean indicating if there are enough licenses
+ *   - skipLicenseCheck: Boolean indicating if license check was skipped
+ *   - currentGhasCommitters: Array of emails for committers already using GHAS licenses
+ *   - newCommitters: Number of committers that would need new licenses
+ *   - newCommittersList: Array of committer emails that would need new licenses
+ *   - estimatedLicensesNeeded: Number of new licenses that would be needed
  */
-function checkLicenseAvailability(env, skipCheck = false) {
+function checkLicenseAvailability(env, skipCheck = false, repositories = []) {
   // If skipping check, return default values that indicate success
   if (skipCheck) {
     console.log('Skipping license check as requested');
@@ -267,7 +382,11 @@ function checkLicenseAvailability(env, skipCheck = false) {
       availableLicenses: 999,
       minRemainingLicenses: parseInt(env.MIN_REMAINING_LICENSES, 10) || 1,
       hasEnoughLicenses: true,
-      skipLicenseCheck: true
+      skipLicenseCheck: true,
+      currentGhasCommitters: [],
+      newCommitters: 0,
+      newCommittersList: [],
+      estimatedLicensesNeeded: 0
     };
   }
 
@@ -285,12 +404,11 @@ function checkLicenseAvailability(env, skipCheck = false) {
   // Use the token that was already set as GH_ENTERPRISE_TOKEN
   // The workflow will handle setting the right token value from the auth_var
   const ghecToken = env.GH_ENTERPRISE_TOKEN;
+  const ghecHostname = new URL(ghecApiUrl).hostname.replace(/^api\./, '');
   
   // Get total and used GHAS licenses from GHEC API
-  // Extract hostname from ghecApiUrl for GitHub CLI
-  const ghecHostname = new URL(ghecApiUrl).hostname.replace(/^api\./, '');
-  const cmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
-  const ghasDataRaw = execSync(cmd, { 
+  const licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
+  const ghasDataRaw = execSync(licenseCmd, { 
     env: { ...env, GH_TOKEN: ghecToken },
     encoding: 'utf8'
   });
@@ -298,21 +416,99 @@ function checkLicenseAvailability(env, skipCheck = false) {
   const ghasData = JSON.parse(ghasDataRaw);
   const totalLicenses = ghasData.purchased_advanced_security_committers;
   const usedLicenses = ghasData.total_advanced_security_committers;
+  
+  // Extract all unique committer emails from repositories that already have GHAS enabled
+  const currentGhasCommitters = new Set();
+  if (ghasData.repositories && Array.isArray(ghasData.repositories)) {
+    console.log(`Found ${ghasData.repositories.length} repositories with GHAS enabled`);
+    
+    for (const repo of ghasData.repositories) {
+      if (repo.advanced_security_committers_breakdown && Array.isArray(repo.advanced_security_committers_breakdown)) {
+        for (const committer of repo.advanced_security_committers_breakdown) {
+          if (committer.last_pushed_email) {
+            currentGhasCommitters.add(committer.last_pushed_email.toLowerCase());
+          }
+        }
+      }
+    }
+    console.log(`Found ${currentGhasCommitters.size} unique committers currently using GHAS licenses`);
+  }
+  
+  // Create a base license availability assessment
   const availableLicenses = totalLicenses - usedLicenses;
   const minRemainingLicenses = parseInt(env.MIN_REMAINING_LICENSES, 10) || 1;
   
   console.log(`Total GHAS licenses: ${totalLicenses}`);
-  console.log(`Used GHAS licenses: ${usedLicenses}`);
-  console.log(`Available GHAS licenses: ${availableLicenses}`);
+  console.log(`Currently used GHAS licenses: ${usedLicenses}`);
+  console.log(`Base available licenses: ${availableLicenses}`);
   console.log(`Min remaining licenses required: ${minRemainingLicenses}`);
+  
+  // If no repositories are provided for analysis, use the base license check
+  if (!repositories || repositories.length === 0) {
+    console.log('No repositories provided for license analysis, using base license check');
+    return {
+      totalLicenses,
+      usedLicenses,
+      availableLicenses,
+      minRemainingLicenses,
+      hasEnoughLicenses: availableLicenses > minRemainingLicenses,
+      skipLicenseCheck: false,
+      currentGhasCommitters: Array.from(currentGhasCommitters),
+      newCommitters: 0,
+      estimatedLicensesNeeded: 0
+    };
+  }
+  
+  // Prepare token mapping for each hostname
+  const tokensByHostname = {};
+  
+  // Add GHEC token
+  tokensByHostname[ghecHostname] = ghecToken;
+  
+  // Add tokens for all GHES instances
+  if (config.ghes_instances && Array.isArray(config.ghes_instances)) {
+    for (const instance of config.ghes_instances) {
+      try {
+        const apiUrl = new URL(instance.api_url);
+        const hostname = apiUrl.hostname.replace(/^api\./, '');
+        tokensByHostname[hostname] = env[instance.auth_var];
+      } catch (error) {
+        console.error(`Error processing instance config:`, error.message);
+      }
+    }
+  }
+  
+  // Get all committers from the repositories to be enabled
+  console.log(`Analyzing committers for ${repositories.length} repositories...`);
+  const repoCommitters = getAllUniqueCommitters(repositories, tokensByHostname);
+  console.log(`Found ${repoCommitters.length} unique committers in the repositories to enable`);
+  
+  // Calculate new committers (those in repos to enable but not already using GHAS licenses)
+  const newCommittersList = repoCommitters.filter(committer => !currentGhasCommitters.has(committer.toLowerCase()));
+  const newCommittersCount = newCommittersList.length;
+  console.log(`Identified ${newCommittersCount} new committers that would need licenses`);
+  
+  // Final license check including committer analysis
+  const estimatedLicensesNeeded = newCommittersCount;
+  const estimatedAvailableLicenses = availableLicenses - estimatedLicensesNeeded;
+  
+  console.log(`Estimated licenses needed: ${estimatedLicensesNeeded}`);
+  console.log(`Estimated available licenses after enablement: ${estimatedAvailableLicenses}`);
+  console.log(`Min remaining licenses required: ${minRemainingLicenses}`);
+  
+  const hasEnoughLicenses = estimatedAvailableLicenses >= minRemainingLicenses;
   
   return {
     totalLicenses,
     usedLicenses,
-    availableLicenses,
+    availableLicenses: estimatedAvailableLicenses,
     minRemainingLicenses,
-    hasEnoughLicenses: availableLicenses > minRemainingLicenses,
-    skipLicenseCheck: false
+    hasEnoughLicenses,
+    skipLicenseCheck: false,
+    currentGhasCommitters: Array.from(currentGhasCommitters),
+    newCommitters: newCommittersCount,
+    newCommittersList,
+    estimatedLicensesNeeded
   };
 }
 
@@ -335,7 +531,9 @@ function createResultsComment(params) {
     hostname,
     instanceName,
     skipLicenseCheck,
-    organizationUrls
+    organizationUrls,
+    newCommitters,
+    estimatedLicensesNeeded
   } = params;
   
   let comment = `## GHAS Enablement Results for ${hostname}\n\n`;
@@ -347,7 +545,28 @@ function createResultsComment(params) {
     comment += `**License Summary:**\n`;
     comment += `- Total GHAS licenses: ${totalLicenses}\n`;
     comment += `- Used GHAS licenses: ${usedLicenses}\n`;
-    comment += `- Available GHAS licenses: ${availableLicenses}\n`;
+    
+    // Add committer analysis if available
+    if (newCommitters !== undefined && estimatedLicensesNeeded !== undefined) {
+      comment += `- New committers requiring licenses: ${newCommitters}\n`;
+      comment += `- Estimated licenses needed: ${estimatedLicensesNeeded}\n`;
+      
+      // If we have the detailed list of new committers and there aren't too many, show them
+      if (params.newCommittersList && Array.isArray(params.newCommittersList)) {
+        // Only show emails if the list is reasonably small (max 10)
+        if (params.newCommittersList.length > 0 && params.newCommittersList.length <= 10) {
+          comment += `\n**New committer emails:**\n`;
+          params.newCommittersList.forEach(email => {
+            comment += `- ${email}\n`;
+          });
+          comment += `\n`;
+        } else if (params.newCommittersList.length > 10) {
+          comment += `- ${params.newCommittersList.length} unique committers identified (too many to list)\n`;
+        }
+      }
+    }
+    
+    comment += `- Available GHAS licenses after enablement: ${availableLicenses}\n`;
     comment += `- Minimum required remaining licenses: ${minRemainingLicenses}\n\n`;
     
     if (!hasEnoughLicenses) {
@@ -439,5 +658,7 @@ module.exports = {
   checkLicenseAvailability,
   createResultsComment,
   fetchOrganizationRepos,
-  isOrganizationUrl
+  isOrganizationUrl,
+  fetchRepoCommitters,
+  getAllUniqueCommitters
 };

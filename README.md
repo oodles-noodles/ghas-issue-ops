@@ -7,7 +7,7 @@ A GitHub Actions workflow that uses IssueOps to automatically enable GitHub Adva
 - **IssueOps-driven automation**: Enable GHAS features by simply creating an issue
 - **Organization-wide enablement**: Process all repositories within an organization with a single request
 - **Multiple GHAS features**: Enable Secret Scanning, Code Scanning, and/or Dependabot Alerts
-- **License management**: Automatically checks license availability before enablement
+- **License management**: Automatically checks license availability using committer analysis before enablement
 - **Enterprise Server support**: Works with GitHub Enterprise Server instances
 - **Multi-instance support**: Configure and manage multiple GHES instances
 
@@ -22,7 +22,8 @@ A GitHub Actions workflow that uses IssueOps to automatically enable GitHub Adva
 3. The workflow automatically:
    - Parses the issue form data
    - For organization URLs, fetches all repositories within those organizations
-   - Checks GHAS license availability (unless the skip option is selected)
+   - Analyzes repository commit history from the last 90 days to identify committers
+   - Checks GHAS license availability based on new committers (unless the skip option is selected)
    - Enables Advanced Security if not already enabled on the repository
    - Enables the selected GHAS features on ALL repositories if sufficient licenses are available
    - Updates the issue with detailed results per enterprise instance
@@ -72,10 +73,12 @@ You can modify the workflow files to:
 
 The workflow uses the following process to manage GHAS licenses:
 1. Retrieves license information from GitHub Enterprise Cloud
-2. Checks if enabling the selected features would leave at least the specified minimum licenses available (default: 1)
-3. If sufficient licenses remain available, enables the selected features on ALL repositories
-4. If enabling would reduce licenses below the threshold, no repositories are enabled
-5. Option to skip license checking entirely for special cases (e.g., when licenses are managed separately)
+2. Analyzes repository committers from the last 90 days
+3. Compares repository committers against existing GHAS committers to identify new license requirements
+4. Checks if enabling the selected features would leave at least the specified minimum licenses available (default: 1) after accounting for new committers
+5. If sufficient licenses remain available, enables the selected features on ALL repositories
+6. If enabling would reduce licenses below the threshold, no repositories are enabled
+7. Option to skip license checking entirely for special cases (e.g., when licenses are managed separately)
 
 ## Technical Implementation
 
@@ -109,5 +112,6 @@ Common issues:
 - **Organization-wide enablement**: Specify an organization URL to process all repositories it contains
 - **Enterprise-specific filtering**: Organization URLs are filtered per enterprise instance to ensure correct processing
 - **Advanced Security verification**: The workflow checks and enables Advanced Security if not already enabled
+- **Committer-based license analysis**: Analyzes repository commit history to accurately estimate license requirements
 - **License checking bypass**: Option to skip license checking for special situations
 - **Robust comment posting**: Fallback mechanisms ensure comments are posted even with permission issues
