@@ -86,17 +86,6 @@ jobs:
       - name: Install dependencies
         run: npm install js-yaml
       
-      - name: Set dynamic token value
-        id: set_token
-        run: |
-          # Log hostname and auth var for debugging
-          echo "Repository hostname: ${{ matrix.hostname }}"
-          echo "Auth variable from matrix: ${{ matrix.auth_var }}"
-          
-          
-          # Set the token value dynamically using the auth_var
-          echo "GH_ENTERPRISE_TOKEN=${{ secrets[matrix.auth_var] }}" >> $GITHUB_ENV
-
       
       - name: Check license availability
         id: check_licenses
@@ -105,7 +94,8 @@ jobs:
           ENTERPRISE_URL: ${{ matrix.api_url }}
           ENTERPRISE_NAME: ${{ matrix.instance_name }}
           MIN_REMAINING_LICENSES: ${{ matrix.min_remaining_licenses }}
-          GH_ENTERPRISE_TOKEN: ${{ env.GH_ENTERPRISE_TOKEN }}
+          AUTH_VAR: ${{ matrix.auth_var }}
+          GH_ENTERPRISE_TOKEN: ${{ secrets[matrix.auth_var] }}
           GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
         with:
           script: |
@@ -130,6 +120,7 @@ jobs:
         if: steps.check_licenses.outputs.has_enough_licenses == 'true'
         env:
           ENTERPRISE_URL: ${{ matrix.api_url }}
+          GH_ENTERPRISE_TOKEN: ${{ secrets[matrix.auth_var] }}
           REPOSITORIES: ${{ toJson(matrix.repositories) }}
           ENABLE_SECRET_SCANNING: ${{ matrix.enable_secret_scanning }}
           ENABLE_CODE_SCANNING: ${{ matrix.enable_code_scanning }}

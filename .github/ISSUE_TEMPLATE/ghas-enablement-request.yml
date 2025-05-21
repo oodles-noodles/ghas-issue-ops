@@ -38,24 +38,6 @@ body:
       description: Select which GHAS features you want to enable
     validations:
       required: true
-
-  - type: input
-    id: enterprise_name
-    attributes:
-      label: GitHub Enterprise Name (optional)
-      description: The name of your GitHub Enterprise organization (auto-detected if left blank)
-      placeholder: example-enterprise
-    validations:
-      required: false
-
-  - type: input
-    id: enterprise_server
-    attributes:
-      label: GitHub Enterprise Server URL (optional)
-      description: The URL of your GitHub Enterprise Server (auto-detected if left blank)
-      placeholder: https://github.example.com
-    validations:
-      required: false
       
   - type: input
     id: min_remaining_licenses
