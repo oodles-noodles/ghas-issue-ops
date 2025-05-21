@@ -8,9 +8,6 @@ jobs:
   process-ghas-request:
     if: contains(github.event.issue.labels.*.name, 'ghas-enablement')
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
     outputs:
       matrix_json: ${{ steps.group_repos.outputs.matrix_json }}
     steps:
@@ -76,6 +73,8 @@ jobs:
   enable-ghas-for-instances:
     needs: process-ghas-request
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     strategy:
       matrix:
         include: ${{ fromJson(needs.process-ghas-request.outputs.matrix_json) }}
@@ -85,7 +84,6 @@ jobs:
       
       - name: Install dependencies
         run: npm install js-yaml
-      
       
       - name: Check license availability
         id: check_licenses
