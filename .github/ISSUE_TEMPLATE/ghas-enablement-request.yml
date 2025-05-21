@@ -14,15 +14,16 @@ body:
   - type: textarea
     id: repositories
     attributes:
-      label: Repository URLs
+      label: Repository or Organization URLs
       description: |
-        Please provide the full URLs of the repositories to enable GHAS Secret Scanning (one per line).
-        Example:
-        https://github.example.com/org-name/repo-name-1
-        https://github.example.com/org-name/repo-name-2
+        Please provide the full URLs of repositories or organizations (one per line).
+        - For specific repositories: https://github.example.com/org-name/repo-name
+        - For all repositories in an organization: https://github.example.com/org-name
+        
+        If you specify an organization URL, all repositories in that organization will be processed.
       placeholder: |
         https://github.example.com/org-name/repo-name-1
-        https://github.example.com/org-name/repo-name-2
+        https://github.example.com/org-name (all repositories in this org)
     validations:
       required: true
       

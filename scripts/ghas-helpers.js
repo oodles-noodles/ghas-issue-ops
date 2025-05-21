@@ -4,6 +4,75 @@ const yaml = require('js-yaml');
 const { execSync } = require('child_process');
 
 /**
+ * Fetches all repositories for a given organization URL
+ * @param {string} orgUrl - The URL of the organization
+ * @param {string} token - The token for authentication
+ * @returns {Array} Array of repository URLs
+ */
+function fetchOrganizationRepos(orgUrl, token) {
+  try {
+    // Parse the URL to extract components
+    const url = new URL(orgUrl);
+    const hostname = url.hostname;
+    
+    // Extract org name from path (remove leading slash)
+    const orgPath = url.pathname.replace(/^\//, '');
+    
+    if (!orgPath) {
+      console.error(`Invalid organization URL: ${orgUrl}. Could not extract organization name.`);
+      return [];
+    }
+    
+    console.log(`Fetching repositories for organization: ${orgPath} from ${hostname}`);
+    
+    // Use GitHub CLI to fetch repositories
+    // Note: This may need pagination for orgs with many repos
+    const cmd = `gh api -H "Accept: application/vnd.github+json" "/orgs/${orgPath}/repos?per_page=100" --hostname "${hostname}"`;
+    
+    const reposDataRaw = execSync(cmd, {
+      env: { ...process.env, GH_TOKEN: token },
+      encoding: 'utf8'
+    });
+    
+    const reposData = JSON.parse(reposDataRaw);
+    if (!Array.isArray(reposData)) {
+      console.error(`Invalid response when fetching repositories for ${orgPath}`);
+      return [];
+    }
+    
+    // Map to full repository URLs
+    const repoUrls = reposData.map(repo => {
+      // Construct the full URL using the hostname and full_name (org/repo)
+      return `https://${hostname}/${repo.full_name}`;
+    });
+    
+    console.log(`Found ${repoUrls.length} repositories in organization ${orgPath}`);
+    return repoUrls;
+  } catch (error) {
+    console.error(`Error fetching repositories for organization ${orgUrl}:`, error.message);
+    return [];
+  }
+}
+
+/**
+ * Checks if a URL points to an organization rather than a specific repository
+ * @param {string} url - The URL to check
+ * @returns {boolean} True if it's an org URL, false otherwise
+ */
+function isOrganizationUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/').filter(Boolean);
+    
+    // If there's only one path segment (org name) and no additional path, it's an org URL
+    return pathParts.length === 1;
+  } catch (error) {
+    console.error(`Invalid URL: ${url}`, error.message);
+    return false;
+  }
+}
+
+/**
  * Parses config.yaml and groups repositories by GHES instance
  * @param {string} repositoriesJson - JSON string of repositories
  * @param {boolean} enableSecretScanning - Whether to enable secret scanning
@@ -18,9 +87,64 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
   const config = yaml.load(configYaml);
   
   // Parse repositories from JSON string
-  const repositories = JSON.parse(repositoriesJson);
+  const inputRepos = JSON.parse(repositoriesJson);
   
-  // Group repositories by hostname (extracted from the URL)
+  // Expand organization URLs to include all repositories
+  const repositories = [];
+  const orgUrls = [];
+  
+  // First pass: identify and separate org URLs from repo URLs
+  inputRepos.forEach(url => {
+    if (isOrganizationUrl(url)) {
+      orgUrls.push(url);
+    } else {
+      repositories.push(url);
+    }
+  });
+  
+  console.log(`Found ${repositories.length} repository URLs and ${orgUrls.length} organization URLs`);
+  
+  // Second pass: expand org URLs to repo URLs
+  // Note: This is done in a separate loop because we need to find the right token for each org
+  if (orgUrls.length > 0) {
+    // Find tokens for each hostname
+    const tokensByHostname = {};
+    
+    // Process GHES instances
+    if (config.ghes_instances && Array.isArray(config.ghes_instances)) {
+      for (const instance of config.ghes_instances) {
+        try {
+          const apiUrl = new URL(instance.api_url);
+          const hostname = apiUrl.hostname.replace(/^api\./, '');
+          tokensByHostname[hostname] = process.env[instance.auth_var];
+        } catch (error) {
+          console.error(`Error processing instance config:`, error.message);
+        }
+      }
+    }
+    
+    // Process each org URL
+    orgUrls.forEach(orgUrl => {
+      try {
+        const hostname = new URL(orgUrl).hostname;
+        const token = tokensByHostname[hostname];
+        
+        if (!token) {
+          console.error(`No token found for hostname ${hostname}`);
+          return;
+        }
+        
+        // Fetch all repositories for this organization
+        const orgRepos = fetchOrganizationRepos(orgUrl, token);
+        console.log(`Adding ${orgRepos.length} repositories from organization URL: ${orgUrl}`);
+        repositories.push(...orgRepos);
+      } catch (error) {
+        console.error(`Error processing org URL ${orgUrl}:`, error.message);
+      }
+    });
+  }
+  
+  // Group repositories by hostname
   const groupedRepos = {};
   repositories.forEach(repo => {
     try {
@@ -210,7 +334,8 @@ function createResultsComment(params) {
     minRemainingLicenses,
     hostname,
     instanceName,
-    skipLicenseCheck
+    skipLicenseCheck,
+    organizationUrls
   } = params;
   
   let comment = `## GHAS Enablement Results for ${hostname}\n\n`;
@@ -239,6 +364,14 @@ function createResultsComment(params) {
     if (enableCodeScanning) comment += `- ✅ Code Scanning (default setup)\n`;
     if (enableDependabotAlerts) comment += `- ✅ Dependabot Alerts\n`;
     
+    // If organization URLs were provided, mention them
+    if (organizationUrls && organizationUrls.length > 0) {
+      comment += `\n### Organization(s)\n`;
+      organizationUrls.forEach(orgUrl => {
+        comment += `- ${orgUrl}\n`;
+      });
+    }
+    
     comment += `\n### Repositories\n`;
     repositories.forEach(repo => {
       comment += `- ${repo}\n`;
@@ -254,9 +387,10 @@ function createResultsComment(params) {
  * @returns {Object} Parsed data including repositories and feature flags
  */
 function parseIssueBody(body) {
-  // Parse the repository URLs from the form submission
-  const repoListMatch = body.match(/### Repository URLs([\s\S]*?)(?:###|$)/);
-  const repoListRaw = repoListMatch ? repoListMatch[1].trim() : '';
+  // Parse the repository and/or organization URLs from the form submission
+  // Match both "Repository URLs" (old format) and "Repository or Organization URLs" (new format)
+  const repoListMatch = body.match(/### Repository( or Organization)? URLs([\s\S]*?)(?:###|$)/);
+  const repoListRaw = repoListMatch ? repoListMatch[2].trim() : '';
   const repositories = repoListRaw.split('\n').map(repo => repo.trim()).filter(Boolean);
   
   // Parse the selected GHAS features
@@ -303,5 +437,7 @@ module.exports = {
   determineTokenName,
   getTokenValue,
   checkLicenseAvailability,
-  createResultsComment
+  createResultsComment,
+  fetchOrganizationRepos,
+  isOrganizationUrl
 };

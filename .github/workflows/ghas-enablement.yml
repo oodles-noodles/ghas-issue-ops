@@ -8,6 +8,8 @@ jobs:
   process-ghas-request:
     if: contains(github.event.issue.labels.*.name, 'ghas-enablement')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       matrix_json: ${{ steps.group_repos.outputs.matrix_json }}
     steps:
@@ -41,6 +43,10 @@ jobs:
       - name: Parse config.yaml and group repositories by GHES instance
         id: group_repos
         uses: actions/github-script@v7
+        env:
+          GHES_API_TOKEN_1: ${{ secrets.GHES_API_TOKEN_1 }}
+          GHES_API_TOKEN_2: ${{ secrets.GHES_API_TOKEN_2 }}
+          GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
         with:
           script: |
             const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
@@ -52,6 +58,10 @@ jobs:
             const enableDependabotAlerts = ${{ steps.parse_issue.outputs.enable_dependabot_alerts }};
             const minRemainingLicenses = ${{ steps.parse_issue.outputs.min_remaining_licenses }};
             const skipLicenseCheck = ${{ steps.parse_issue.outputs.skip_license_check }};
+            
+            // Make tokens available to the helper script
+            // This is needed for org URL processing
+            process.env.GH_ENTERPRISE_TOKEN = process.env.GHES_API_TOKEN_1;
             
             // Use helper function to parse config and group repositories
             const matrixItems = helpers.parseConfigAndGroupRepos(
@@ -215,6 +225,7 @@ jobs:
           echo "enabled_repos=$(echo "${enabled_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
       
       - name: Update issue with results
+        id: update_issue
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -224,6 +235,14 @@ jobs:
             // All license check information comes from single step now
             const hasEnoughLicenses = '${{ steps.check_licenses.outputs.has_enough_licenses }}' === 'true';
             const skipLicenseCheck = '${{ steps.check_licenses.outputs.skip_license_check }}' === 'true';
+            
+            // Parse issue body to identify original inputs for better context
+            const issue = context.payload.issue;
+            const parsedData = helpers.parseIssueBody(issue.body);
+            const originalRepos = parsedData.repositories;
+            
+            // Identify which inputs were org URLs
+            const orgUrls = originalRepos.filter(url => helpers.isOrganizationUrl(url));
             
             // Prepare parameters for comment creation
             const params = {
@@ -240,6 +259,11 @@ jobs:
               hostname: "${{ matrix.hostname }}",
               instanceName: "${{ matrix.instance_name }}"
             };
+            
+            // Add org URLs to params if any were detected
+            if (orgUrls.length > 0) {
+              params.organizationUrls = orgUrls;
+            }
             
             // Create comment text
             const comment = helpers.createResultsComment(params);
