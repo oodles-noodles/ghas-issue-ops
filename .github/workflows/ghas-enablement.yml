@@ -157,6 +157,26 @@ jobs:
               
               echo "Extracted org: $org, repo_name: $repo_name from $repo"
               
+              # First check if Advanced Security is enabled on the repository
+              echo "Checking if Advanced Security is enabled for $repo"
+              repo_info=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
+                --hostname $HOSTNAME --jq .security_and_analysis 2>/dev/null || echo "{}")
+              
+              # Check if advanced security is enabled
+              advanced_security_enabled=$(echo $repo_info | jq -r '.advanced_security.status // "disabled"')
+              
+              if [[ "$advanced_security_enabled" != "enabled" ]]; then
+                echo "Advanced Security is not enabled for $repo. Enabling it now..."
+                echo '{"security_and_analysis":{"advanced_security":{"status":"enabled"}}}' | \
+                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
+                  --hostname $HOSTNAME \
+                  --input -
+                
+                echo "Advanced Security has been enabled for $repo"
+              else
+                echo "Advanced Security is already enabled for $repo"
+              fi
+              
               # If Code Scanning selected, enable using default setup
               # Note: Default setup also enables Secret Scanning, so we skip the separate Secret Scanning enablement
               if [[ "$ENABLE_CODE_SCANNING" == "true" ]]; then
