@@ -20,8 +20,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Install dependencies
-        run: npm install js-yaml
+      # - name: Install dependencies
+      #   run: npm install js-yaml
       
       - name: Parse issue body
         id: parse_issue
@@ -30,13 +30,12 @@ jobs:
           script: |
             const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
             const issue = context.payload.issue;
-            
-            // Use helper function to parse the issue body and set outputs
             return helpers.parseIssueAndSetOutputs(issue, core);
   
   call-ghas-enablement:
     permissions:
       issues: write
+      contents: read
     needs: parse-issue
     uses: ./.github/workflows/ghas-enablement-action.yml
     with:
