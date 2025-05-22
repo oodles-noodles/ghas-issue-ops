@@ -658,7 +658,16 @@ function parseIssueBody(body) {
   console.log(`Dependabot Alerts: ${enableDependabotAlerts}`);
   console.log(`Min Remaining Licenses: ${validMinLicenses}`);
   console.log(`Skip License Check: ${skipLicenseCheck}`);
-  console.log(`Dry Run: ${dryRun}`);
+  
+  if (dryRun) {
+    console.log('======================================');
+    console.log('✅ DRY RUN MODE IS ACTIVE');
+    console.log('✅ NO CHANGES WILL BE MADE TO REPOSITORIES');
+    console.log('✅ THIS IS ONLY A SIMULATION OF WHAT WOULD HAPPEN');
+    console.log('======================================');
+  } else {
+    console.log(`Dry Run: ${dryRun} (features WILL be enabled)`);
+  }
   
   return {
     repositories,

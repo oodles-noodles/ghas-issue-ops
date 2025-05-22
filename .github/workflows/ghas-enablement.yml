@@ -118,9 +118,15 @@ jobs:
             
             // Check if this is a dry run
             const dryRun = ${{ matrix.dry_run }};
-            console.log(`Dry run mode: ${dryRun ? 'Yes' : 'No'}`);
             if (dryRun) {
-              console.log('🔍 DRY RUN MODE: No changes will be applied to repositories');
+              console.log('🔍 DRY RUN MODE: Yes');
+              console.log('=======================================');
+              console.log('🚨 ATTENTION: This is a DRY RUN 🚨');
+              console.log('No changes will be applied to repositories');
+              console.log('This run will only analyze and report what would happen');
+              console.log('=======================================');
+            } else {
+              console.log('Dry run mode: No - Changes WILL be applied');
             }
             
             // Get the list of repositories to check for license impact
@@ -156,16 +162,24 @@ jobs:
             core.setOutput('estimated_licenses_needed', licenseInfo.estimatedLicensesNeeded);
             core.setOutput('has_enough_licenses', licenseInfo.hasEnoughLicenses.toString());
             core.setOutput('skip_license_check', licenseInfo.skipLicenseCheck);
-            core.setOutput('dry_run', ${{ matrix.dry_run }} ? 'true' : 'false');
+            // We stringified the boolean value to ensure consistent type matching in conditions
+            core.setOutput('dry_run', dryRun ? 'true' : 'false');
             
             // Output the list of new committers if available
             if (licenseInfo.newCommittersList && licenseInfo.newCommittersList.length > 0) {
               core.setOutput('new_committers_list', JSON.stringify(licenseInfo.newCommittersList));
             }
       
+            # Display a message when in dry run mode
+      - name: Dry Run Mode - No Changes
+        if: steps.check_licenses.outputs.has_enough_licenses == 'true' && steps.check_licenses.outputs.dry_run == 'true'
+        run: |
+          echo "🔍 DRY RUN MODE ACTIVE: No changes will be made to repositories. This is only a simulation."
+        
+      # This step will be skipped in dry run mode
       - name: Enable GHAS Features
         id: enable_features
-        if: steps.check_licenses.outputs.has_enough_licenses == 'true' && matrix.dry_run != 'true'
+        if: steps.check_licenses.outputs.has_enough_licenses == 'true' && steps.check_licenses.outputs.dry_run != 'true'
         env:
           ENTERPRISE_URL: ${{ matrix.api_url }}
           REPOSITORIES: ${{ toJson(matrix.repositories) }}
