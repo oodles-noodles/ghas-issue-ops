@@ -43,7 +43,7 @@ jobs:
       enable_secret_scanning: ${{ needs.parse-issue.outputs.enable_secret_scanning == 'true' }}
       enable_code_scanning: ${{ needs.parse-issue.outputs.enable_code_scanning == 'true' }}
       enable_dependabot_alerts: ${{ needs.parse-issue.outputs.enable_dependabot_alerts == 'true' }}
-      min_remaining_licenses: ${{ needs.parse-issue.outputs.min_remaining_licenses }}
+      min_remaining_licenses: ${{ fromJSON(needs.parse-issue.outputs.min_remaining_licenses) }}
       skip_license_check: ${{ needs.parse-issue.outputs.skip_license_check == 'true' }}
       dry_run: ${{ needs.parse-issue.outputs.dry_run == 'true' }}
       issue_number: ${{ github.event.issue.number }}
