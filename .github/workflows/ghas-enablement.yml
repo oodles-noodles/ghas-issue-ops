@@ -46,11 +46,7 @@ jobs:
       skip_license_check: ${{ needs.parse-issue.outputs.skip_license_check == 'true' }}
       dry_run: ${{ needs.parse-issue.outputs.dry_run == 'true' }}
       issue_number: ${{ github.event.issue.number }}
-    secrets:
-      GHES_API_TOKEN_1: ${{ secrets.GHES_API_TOKEN_1 }}
-      GHES_API_TOKEN_2: ${{ secrets.GHES_API_TOKEN_2 }}
-      GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    secrets: inherit
 
 
 
