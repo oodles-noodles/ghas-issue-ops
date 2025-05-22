@@ -533,10 +533,15 @@ function createResultsComment(params) {
     skipLicenseCheck,
     organizationUrls,
     newCommitters,
-    estimatedLicensesNeeded
+    estimatedLicensesNeeded,
+    dryRun
   } = params;
   
-  let comment = `## GHAS Enablement Results for ${hostname}\n\n`;
+  let comment = `## GHAS ${dryRun ? 'Dry Run Analysis' : 'Enablement Results'} for ${hostname}\n\n`;
+  
+  if (dryRun) {
+    comment += `> **⚠️ DRY RUN MODE ⚠️**\n>\n> No changes have been made to your repositories.\n> This analysis shows what would happen if you run the enablement for real.\n\n`;
+  }
   
   if (skipLicenseCheck) {
     comment += `**License Check: SKIPPED**\n\n`;
@@ -578,10 +583,10 @@ function createResultsComment(params) {
   if (!enableSecretScanning && !enableCodeScanning && !enableDependabotAlerts) {
     comment += '⚠️ No GHAS features were selected for enablement.\n';
   } else {
-    comment += `### Features Enabled\n`;
-    if (enableSecretScanning) comment += `- ✅ Secret Scanning\n`;
-    if (enableCodeScanning) comment += `- ✅ Code Scanning (default setup)\n`;
-    if (enableDependabotAlerts) comment += `- ✅ Dependabot Alerts\n`;
+    comment += `### Features ${dryRun ? 'Selected' : 'Enabled'}\n`;
+    if (enableSecretScanning) comment += `- ${dryRun ? '➡️' : '✅'} Secret Scanning\n`;
+    if (enableCodeScanning) comment += `- ${dryRun ? '➡️' : '✅'} Code Scanning (default setup)\n`;
+    if (enableDependabotAlerts) comment += `- ${dryRun ? '➡️' : '✅'} Dependabot Alerts\n`;
     
     // If organization URLs were provided, mention them
     if (organizationUrls && organizationUrls.length > 0) {
@@ -595,6 +600,17 @@ function createResultsComment(params) {
     repositories.forEach(repo => {
       comment += `- ${repo}\n`;
     });
+  }
+  
+  if (dryRun) {
+    comment += `\n\n---\n`;
+    comment += `### ✅ Next steps\n`;
+    comment += `This was a dry run analysis. If you're satisfied with the analysis and want to proceed:\n\n`;
+    comment += `1. Create a new issue using the same GHAS Enablement Request template\n`;
+    comment += `2. Use the same settings you provided for this dry run\n`;
+    comment += `3. Set **"Dry Run Mode"** to **"No"**\n`;
+    comment += `4. Submit the issue to trigger actual GHAS enablement\n\n`;
+    comment += `The workflow will then enable the selected GHAS features on your repositories.\n`;
   }
   
   return comment;
@@ -631,12 +647,18 @@ function parseIssueBody(body) {
   const skipLicenseCheckRaw = skipLicenseCheckMatch ? skipLicenseCheckMatch[1].trim() : 'No';
   const skipLicenseCheck = skipLicenseCheckRaw === 'Yes';
   
+  // Parse dry run option (dropdown field)
+  const dryRunMatch = body.match(/### Dry Run Mode\s*([^\n]+)/);
+  const dryRunRaw = dryRunMatch ? dryRunMatch[1].trim() : 'No';
+  const dryRun = dryRunRaw === 'Yes';
+  
   console.log(`Repositories: ${repositories.length}`);
   console.log(`Secret Scanning: ${enableSecretScanning}`);
   console.log(`Code Scanning: ${enableCodeScanning}`);
   console.log(`Dependabot Alerts: ${enableDependabotAlerts}`);
   console.log(`Min Remaining Licenses: ${validMinLicenses}`);
   console.log(`Skip License Check: ${skipLicenseCheck}`);
+  console.log(`Dry Run: ${dryRun}`);
   
   return {
     repositories,
@@ -646,7 +668,8 @@ function parseIssueBody(body) {
       enableDependabotAlerts
     },
     minRemainingLicenses: validMinLicenses,
-    skipLicenseCheck
+    skipLicenseCheck,
+    dryRun
   };
 }
 

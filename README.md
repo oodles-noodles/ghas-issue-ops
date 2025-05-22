@@ -8,6 +8,7 @@ A GitHub Actions workflow that uses IssueOps to automatically enable GitHub Adva
 - **Organization-wide enablement**: Process all repositories within an organization with a single request
 - **Multiple GHAS features**: Enable Secret Scanning, Code Scanning, and/or Dependabot Alerts
 - **License management**: Automatically checks license availability using committer analysis before enablement
+- **Dry run capability**: Preview what would happen without actually making changes
 - **Enterprise Server support**: Works with GitHub Enterprise Server instances
 - **Multi-instance support**: Configure and manage multiple GHES instances
 
@@ -19,6 +20,7 @@ A GitHub Actions workflow that uses IssueOps to automatically enable GitHub Adva
    - Which GHAS features to enable (Secret Scanning, Code Scanning, Dependabot Alerts)
    - Option to skip license checking (for special cases)
    - Minimum remaining licenses threshold (optional)
+   - Dry run mode option (preview without making changes)
 3. The workflow automatically:
    - Parses the issue form data
    - For organization URLs, fetches all repositories within those organizations
@@ -56,8 +58,22 @@ The workflow uses GitHub Enterprise Cloud for license information by default, en
    - Select which GHAS features to enable
    - Optionally specify minimum remaining licenses (default: 1)
    - Optionally choose to skip license checking (for special cases)
+   - Optionally use dry run mode to preview changes without applying them
 5. Submit the issue
 6. The workflow will automatically run and comment on the issue with results for each enterprise instance
+
+### Using Dry Run Mode
+
+Dry run mode allows you to preview what would happen if you enable GHAS features without actually making any changes:
+
+1. Select "Yes" for the "Dry Run Mode" option when creating your issue
+2. The workflow will analyze repositories, check licenses, and list what actions would be taken
+3. A detailed report will be generated showing:
+   - License availability analysis
+   - New committers requiring licenses
+   - Repositories that would be enabled
+   - Features that would be applied
+4. To proceed with actual enablement, create a new issue with the same settings but with "Dry Run Mode" set to "No"
 
 ## Customization
 

@@ -60,3 +60,15 @@ body:
       default: 0
     validations:
       required: false
+      
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry Run Mode
+      description: Only analyze and report what would happen, without actually enabling GHAS features
+      options:
+        - "No"
+        - "Yes"
+      default: 0
+    validations:
+      required: false
