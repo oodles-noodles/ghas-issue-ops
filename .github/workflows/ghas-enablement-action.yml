@@ -45,8 +45,7 @@ on:
         required: false
       GH_ENTERPRISE_TOKEN_CLOUD:
         required: true
-      GITHUB_TOKEN:
-        required: true
+
 
 jobs:
   process-ghas-request:
@@ -65,10 +64,6 @@ jobs:
       - name: Parse config.yaml and group repositories by GHES instance
         id: group_repos
         uses: actions/github-script@v7
-        env:
-          GHES_API_TOKEN_1: ${{ secrets.GHES_API_TOKEN_1 }}
-          GHES_API_TOKEN_2: ${{ secrets.GHES_API_TOKEN_2 }}
-          GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
         with:
           script: |
             const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
@@ -81,10 +76,6 @@ jobs:
             const minRemainingLicenses = ${{ inputs.min_remaining_licenses }};
             const skipLicenseCheck = ${{ inputs.skip_license_check }};
             const dryRun = ${{ inputs.dry_run }};
-            
-            // Make tokens available to the helper script
-            // This is needed for org URL processing
-            process.env.GH_ENTERPRISE_TOKEN = process.env.GHES_API_TOKEN_1;
             
             // Use helper function to parse config and group repositories
             const matrixItems = helpers.parseConfigAndGroupRepos(
