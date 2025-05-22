@@ -8,6 +8,8 @@ A GitHub Actions workflow that uses IssueOps to automatically enable GitHub Adva
 - **Organization-wide enablement**: Process all repositories within an organization with a single request
 - **Multiple GHAS features**: Enable Secret Scanning, Code Scanning, and/or Dependabot Alerts
 - **License management**: Automatically checks license availability using committer analysis before enablement
+- **Efficient error handling**: Validates repositories during enablement with detailed error reporting
+- **Fault tolerance**: Continues processing valid repositories even when some URLs are invalid
 - **Dry run capability**: Preview what would happen without actually making changes
 - **Enterprise Server support**: Works with GitHub Enterprise Server instances
 - **Multi-instance support**: Configure and manage multiple GHES instances
@@ -146,6 +148,7 @@ Common issues:
 - **API endpoint errors**: Verify your Enterprise Server URL in config.yaml
 - **Comment posting issues**: The workflow has fallback mechanisms but check workflow permissions
 - **License check failures**: Verify the GitHub Enterprise Cloud configuration in config.yaml
+- **Invalid repository URLs**: The workflow automatically detects invalid repository URLs during enablement and provides specific error messages (404 Not Found, 403 Access Denied, etc.) in the results comment
 
 ## Advanced Features
 

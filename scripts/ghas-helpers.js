@@ -534,7 +534,8 @@ function createResultsComment(params) {
     organizationUrls,
     newCommitters,
     estimatedLicensesNeeded,
-    dryRun
+    dryRun,
+    invalidRepositories // New parameter for invalid repositories
   } = params;
   
   let comment = `## GHAS ${dryRun ? 'Dry Run Analysis' : 'Enablement Results'} for ${hostname}\n\n`;
@@ -596,7 +597,16 @@ function createResultsComment(params) {
       });
     }
     
-    comment += `\n### Repositories\n`;
+    // Display invalid repositories if any
+    if (invalidRepositories && invalidRepositories.length > 0) {
+      comment += `\n### ⚠️ Invalid Repositories (Skipped)\n`;
+      invalidRepositories.forEach(item => {
+        comment += `- **${item.url}**\n  - Error: ${item.error}\n`;
+      });
+      comment += `\n`;
+    }
+    
+    comment += `\n### ${invalidRepositories && invalidRepositories.length > 0 ? 'Valid ' : ''}Repositories${dryRun ? ' (No Changes Applied)' : ' Enabled'}\n`;
     repositories.forEach(repo => {
       comment += `- ${repo}\n`;
     });
@@ -614,6 +624,18 @@ function createResultsComment(params) {
   }
   
   return comment;
+}
+
+/**
+ * This function has been removed as validation is now handled directly during
+ * the enablement process for more efficient error handling.
+ * 
+ * @deprecated This function is no longer used as repository validation is now performed
+ * during the actual enablement process to reduce redundant API calls.
+ */
+async function validateRepositoryUrl(repoUrl, hostname, token) {
+  console.warn('validateRepositoryUrl is deprecated. Repository validation is now done during enablement.');
+  return { valid: true }; // Default to valid as this will be checked during enablement
 }
 
 /**
@@ -710,10 +732,10 @@ module.exports = {
   determineTokenName,
   getTokenValue,
   checkLicenseAvailability,
+  validateRepositoryUrl, // Kept for backward compatibility but deprecated
   createResultsComment,
   fetchOrganizationRepos,
   isOrganizationUrl,
   fetchRepoCommitters,
-  getAllUniqueCommitters,
-  parseIssueAndSetOutputs
+  getAllUniqueCommitters
 };

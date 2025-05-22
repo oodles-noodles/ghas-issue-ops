@@ -98,10 +98,21 @@ This script checks:
 - Correct handling of the issue number
 - Proper secret passing
 
+## Repository URL Validation
+
+The workflow includes efficient repository URL validation integrated directly into the enablement process:
+
+1. **Format checking**: Ensures repository URLs are well-formed and contain both organization and repository names
+2. **Inline validation**: Validates repositories during the actual enablement process, eliminating redundant API calls
+3. **Detailed error reporting**: Captures specific error types (404, 403, 422) with customized error messages
+4. **Fault tolerance**: Continues processing valid repositories even when some URLs are invalid
+5. **Performance optimization**: Eliminates separate validation steps by capturing errors during actual enablement
+
+This approach ensures that the workflow continues to function efficiently even when some repository URLs are problematic, reducing API calls while providing detailed error information.
+
 ## Future Improvements
 
 1. **Versioned Releases**: Consider tagging versions of the reusable workflow
 2. **Automated Testing**: Add CI/CD for testing the reusable workflow
 3. **Input Validation**: Add more robust validation for inputs
-4. **Error Handling**: Enhance error reporting and fallback mechanisms
-5. **Metrics**: Add telemetry to track usage and performance of the workflow
+4. **Metrics**: Add telemetry to track usage and performance of the workflow

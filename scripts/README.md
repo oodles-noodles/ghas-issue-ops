@@ -12,7 +12,7 @@ The `ghas-helpers.js` file provides modular functions that handle different aspe
 - **determineTokenName**: Determines which authentication token name to use based on the matrix context.
 - **getTokenValue**: Dynamically retrieves the appropriate token value from available secrets based on the token name.
 - **checkLicenseAvailability**: Checks if there are enough GHAS licenses available for enablement by querying the GitHub Enterprise Cloud API.
-- **createResultsComment**: Creates a formatted comment with the results of the GHAS enablement process.
+- **createResultsComment**: Creates a formatted comment with the results of the GHAS enablement process, including information about invalid repositories.
 
 ## Benefits of this Approach
 
@@ -35,3 +35,5 @@ This approach makes the workflow more maintainable and extensible when adding ne
 ## Usage
 
 These functions are used by the GitHub Actions workflow in `.github/workflows/ghas-enablement.yml`. The workflow calls these functions using the `actions/github-script` action, which allows executing JavaScript code as part of the workflow.
+
+The shell scripts are used directly in the workflow using standard shell script execution.

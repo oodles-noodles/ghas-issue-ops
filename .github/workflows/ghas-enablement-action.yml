@@ -193,9 +193,77 @@ jobs:
       
       # Display a message when in dry run mode
       - name: Dry Run Mode - No Changes
+        id: dry_run_mode
         if: steps.check_licenses.outputs.has_enough_licenses == 'true' && steps.check_licenses.outputs.dry_run == 'true'
+        env:
+          ENTERPRISE_URL: ${{ matrix.api_url }}
+          REPOSITORIES: ${{ toJson(matrix.repositories) }}
         run: |
           echo "🔍 DRY RUN MODE ACTIVE: No changes will be made to repositories. This is only a simulation."
+          export GH_ENTERPRISE_TOKEN="${{ secrets[matrix.auth_var] }}"
+          
+          # Extract hostname from ENTERPRISE_URL for GitHub CLI
+          HOSTNAME=$(echo $ENTERPRISE_URL | sed -E 's|https?://([^/]+)/.*|\1|' | sed 's/api\.//')
+          echo "Using hostname: $HOSTNAME"
+          
+          # Create files to track valid and invalid repositories
+          echo "[]" > valid_repos.json
+          echo "[]" > invalid_repos.json
+          
+          # Process each repository but don't make any changes
+          repos=$(echo $REPOSITORIES | jq -r '.[]')
+          
+          for repo in $repos; do
+            if [ -n "$repo" ]; then
+              echo "Analyzing repository: $repo"
+              # Extract the org and repo_name from the URL path
+              repo_path=$(echo "$repo" | sed -E 's|https?://[^/]+/(.+)|\1|')
+              IFS='/' read -r org repo_name <<< "$repo_path"
+              
+              # Validate that we have both org and repo_name
+              if [[ -z "$org" || -z "$repo_name" ]]; then
+                echo "Error: Could not extract organization and repository name from $repo"
+                # Add to invalid repos list
+                error_msg="Could not extract organization and repository name from URL"
+                invalid_repo=$(jq -n --arg url "$repo" --arg error "$error_msg" '{url: $url, error: $error}')
+                jq --argjson item "$invalid_repo" '. += [$item]' invalid_repos.json > temp.json && mv temp.json invalid_repos.json
+                continue
+              fi
+              
+              # Try to get repository info - this is similar to what would happen during enablement
+              # But we don't make any changes in dry run mode
+              echo "Checking repository details: $repo"
+              if ! repo_info=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
+                --hostname $HOSTNAME 2>/dev/null); then
+                echo "Error: Repository not found or not accessible: $repo"
+                # Add to invalid repos list
+                error_msg="Repository not found or not accessible. Please verify the URL and your permissions."
+                invalid_repo=$(jq -n --arg url "$repo" --arg error "$error_msg" '{url: $url, error: $error}')
+                jq --argjson item "$invalid_repo" '. += [$item]' invalid_repos.json > temp.json && mv temp.json invalid_repos.json
+                continue
+              fi
+              
+              # Repository exists and is accessible
+              jq --arg repo "$repo" '. += [$repo]' valid_repos.json > temp.json && mv temp.json valid_repos.json
+              echo "Repository $repo is accessible"
+            fi
+          done
+          
+          # Store valid and invalid repos for reporting
+          valid_repos=$(cat valid_repos.json | tr -d '\n')
+          invalid_repos=$(cat invalid_repos.json | tr -d '\n')
+          echo "valid_repos=${valid_repos}" >> $GITHUB_OUTPUT
+          echo "invalid_repos=${invalid_repos}" >> $GITHUB_OUTPUT
+          
+          # Print summary
+          valid_count=$(jq '. | length' valid_repos.json)
+          invalid_count=$(jq '. | length' invalid_repos.json)
+          echo "-----------------------------------"
+          echo "Dry Run Analysis Summary:"
+          echo "- Valid repositories: $valid_count"
+          echo "- Invalid repositories: $invalid_count"
+          echo "-----------------------------------"
+          echo "✅ Dry run analysis complete"
         
       # This step will be skipped in dry run mode
       - name: Enable GHAS Features
@@ -220,75 +288,103 @@ jobs:
           HOSTNAME=$(echo $ENTERPRISE_URL | sed -E 's|https?://([^/]+)/.*|\1|' | sed 's/api\.//')
           echo "Using hostname: $HOSTNAME"
           
-          repos=$(echo $REPOSITORIES | jq -r '.[]')
+          # Create files to track valid, invalid and enabled repositories
+          echo "[]" > valid_repos.json
+          echo "[]" > invalid_repos.json
           enabled_repos=()
+          
+          repos=$(echo $REPOSITORIES | jq -r '.[]')
           
           for repo in $repos; do
             if [ -n "$repo" ]; then
               echo "Processing repository: $repo"
               # Extract the org and repo_name from the URL path
               # Format: https://hostname/org/repo or http://hostname/org/repo
-              # Use sed to extract just org/repo part from the full URL
               repo_path=$(echo "$repo" | sed -E 's|https?://[^/]+/(.+)|\1|')
               IFS='/' read -r org repo_name <<< "$repo_path"
               
-              # Validate that we have both org and repo_name
+              # Validate repository URL format
               if [[ -z "$org" || -z "$repo_name" ]]; then
                 echo "Error: Could not extract organization and repository name from $repo"
+                # Add to invalid repos list
+                error_msg="Could not extract organization and repository name from URL"
+                invalid_repo=$(jq -n --arg url "$repo" --arg error "$error_msg" '{url: $url, error: $error}')
+                jq --argjson item "$invalid_repo" '. += [$item]' invalid_repos.json > temp.json && mv temp.json invalid_repos.json
                 continue
               fi
               
-              echo "Extracted org: $org, repo_name: $repo_name from $repo"
-              
-              # First check if Advanced Security is enabled on the repository
-              echo "Checking if Advanced Security is enabled for $repo"
-              repo_info=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
-                --hostname $HOSTNAME --jq .security_and_analysis 2>/dev/null || echo "{}")
-              
-              # Check if advanced security is enabled
-              advanced_security_enabled=$(echo $repo_info | jq -r '.advanced_security.status // "disabled"')
-              
-              if [[ "$advanced_security_enabled" != "enabled" ]]; then
-                echo "Advanced Security is not enabled for $repo. Enabling it now..."
-                echo '{"security_and_analysis":{"advanced_security":{"status":"enabled"}}}' | \
+              # Attempt to directly enable Advanced Security
+              # This also serves as a check if the repository exists and is accessible
+              echo "Attempting to enable Advanced Security for $repo"
+              if ! enable_response=$(echo '{"security_and_analysis":{"advanced_security":{"status":"enabled"}}}' | \
                 gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
-                  --hostname $HOSTNAME \
-                  --input -
+                --hostname $HOSTNAME --input - 2>&1); then
                 
-                echo "Advanced Security has been enabled for $repo"
-              else
-                echo "Advanced Security is already enabled for $repo"
+                # If the API call failed, capture the error
+                echo "Error: Failed to enable Advanced Security for $repo"
+                
+                # Try to determine the specific error
+                if [[ "$enable_response" == *"404"* || "$enable_response" == *"Not Found"* ]]; then
+                  error_msg="Repository not found. Please verify the URL and your permissions."
+                elif [[ "$enable_response" == *"403"* || "$enable_response" == *"Forbidden"* ]]; then
+                  error_msg="Access denied. You don't have permission to enable GHAS for this repository."
+                elif [[ "$enable_response" == *"422"* ]]; then
+                  error_msg="Validation failed. Repository may not be eligible for GHAS features."
+                else
+                  error_msg="Failed to enable Advanced Security: $enable_response"
+                fi
+                
+                # Add to invalid repos list
+                invalid_repo=$(jq -n --arg url "$repo" --arg error "$error_msg" '{url: $url, error: $error}')
+                jq --argjson item "$invalid_repo" '. += [$item]' invalid_repos.json > temp.json && mv temp.json invalid_repos.json
+                continue
               fi
               
-              # If Code Scanning selected, enable using default setup
-              # Note: Default setup also enables Secret Scanning, so we skip the separate Secret Scanning enablement
+              # Add to valid repos list
+              jq --arg repo "$repo" '. += [$repo]' valid_repos.json > temp.json && mv temp.json valid_repos.json
+              
+              echo "Advanced Security has been enabled for $repo"
+              
+              # Attempt to enable Code Scanning if selected
               if [[ "$ENABLE_CODE_SCANNING" == "true" ]]; then
                 echo "Enabling Code Scanning with default setup for $repo"
-                echo '{"state":"configured"}' | \
-                gh api -X PUT -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name/code-scanning/default-setup" \
-                  --hostname $HOSTNAME \
-                  --input -
+                if ! code_scan_response=$(echo '{"state":"configured"}' | \
+                  gh api -X PUT -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
+                  "/repos/$org/$repo_name/code-scanning/default-setup" \
+                  --hostname $HOSTNAME --input - 2>&1); then
                   
+                  echo "Warning: Failed to enable Code Scanning for $repo: $code_scan_response"
+                  # We don't fail the whole repository here, just log a warning
+                  # This allows partial success for repositories
+                fi
+                
+                # Default setup enables Secret Scanning too, so we can skip it
                 enabled_repos+=("$repo")
-                continue # Skip individual feature enablement since default setup is comprehensive
+                continue
               fi
               
-              # If Secret Scanning selected (and we're not using default setup)
+              # Enable Secret Scanning if selected (and not using default setup)
               if [[ "$ENABLE_SECRET_SCANNING" == "true" ]]; then
                 echo "Enabling Secret Scanning for $repo"
-                echo '{"security_and_analysis":{"secret_scanning":{"status":"enabled"}}}' | \
-                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
-                  --hostname $HOSTNAME \
-                  --input -
+                if ! secret_scan_response=$(echo '{"security_and_analysis":{"secret_scanning":{"status":"enabled"}}}' | \
+                  gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
+                  "/repos/$org/$repo_name" --hostname $HOSTNAME --input - 2>&1); then
+                  
+                  echo "Warning: Failed to enable Secret Scanning for $repo: $secret_scan_response"
+                  # Log warning but continue with other features
+                fi
               fi
               
-              # If Dependabot Alerts selected
+              # Enable Dependabot Alerts if selected
               if [[ "$ENABLE_DEPENDABOT_ALERTS" == "true" ]]; then
                 echo "Enabling Dependabot Alerts for $repo"
-                echo '{"security_and_analysis":{"vulnerability_alerts":{"status":"enabled"}}}' | \
-                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
-                  --hostname $HOSTNAME \
-                  --input -
+                if ! dependabot_response=$(echo '{"security_and_analysis":{"vulnerability_alerts":{"status":"enabled"}}}' | \
+                  gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
+                  "/repos/$org/$repo_name" --hostname $HOSTNAME --input - 2>&1); then
+                  
+                  echo "Warning: Failed to enable Dependabot Alerts for $repo: $dependabot_response"
+                  # Log warning but continue
+                fi
               fi
               
               enabled_repos+=("$repo")
@@ -296,8 +392,18 @@ jobs:
             fi
           done
           
-          # Store enabled repos for reporting
+          # Store enabled and invalid repos for reporting
           echo "enabled_repos=$(echo "${enabled_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
+          invalid_repos=$(cat invalid_repos.json | tr -d '\n')
+          echo "invalid_repos=${invalid_repos}" >> $GITHUB_OUTPUT
+          
+          # Print summary
+          echo "-----------------------------------"
+          echo "Enablement Summary:"
+          echo "- Successfully enabled: ${#enabled_repos[@]} repositories"
+          invalid_count=$(jq '. | length' invalid_repos.json)
+          echo "- Failed: $invalid_count repositories"
+          echo "-----------------------------------"
       
       - name: Update issue with results
         id: update_issue
@@ -347,6 +453,69 @@ jobs:
             
             console.log(`Found ${orgUrls.length} organization URLs for hostname ${currentHostname}`);
             
+            // Get invalid repositories data if available
+            let invalidRepositoriesData = null;
+            const enableFeaturesOutput = '${{ steps.enable_features.outputs.invalid_repos }}';
+            const dryRunModeOutput = '${{ steps.dry_run_mode.outputs.invalid_repos }}';
+            
+            if (enableFeaturesOutput && enableFeaturesOutput !== '') {
+              try {
+                console.log('Attempting to parse enable_features invalid_repos output');
+                // Parse invalid repositories from the enable_features output
+                // First check if it's already a string representation of valid JSON
+                if (enableFeaturesOutput.startsWith('[') && enableFeaturesOutput.endsWith(']')) {
+                  // It appears to be a JSON array already
+                  invalidRepositoriesData = JSON.parse(enableFeaturesOutput);
+                } else {
+                  // Otherwise it might need additional processing
+                  console.log('Output does not appear to be a direct JSON array');
+                  // Try to extract what looks like JSON
+                  const jsonMatch = enableFeaturesOutput.match(/\[.*\]/s);
+                  if (jsonMatch) {
+                    invalidRepositoriesData = JSON.parse(jsonMatch[0]);
+                  } else {
+                    console.error('Could not find JSON array in output');
+                  }
+                }
+                
+                if (invalidRepositoriesData) {
+                  console.log(`Found ${invalidRepositoriesData.length} invalid repositories from enable_features`);
+                }
+              } catch (error) {
+                console.error('Error parsing invalid repositories from enable_features:', error.message);
+                console.error('Raw output:', enableFeaturesOutput);
+              }
+            } else if (dryRun && dryRunModeOutput && dryRunModeOutput !== '') {
+              try {
+                console.log('Attempting to parse dry_run_mode invalid_repos output');
+                // Parse invalid repositories from the dry_run_mode output
+                // First check if it's already a string representation of valid JSON
+                if (dryRunModeOutput.startsWith('[') && dryRunModeOutput.endsWith(']')) {
+                  // It appears to be a JSON array already
+                  invalidRepositoriesData = JSON.parse(dryRunModeOutput);
+                } else {
+                  // Otherwise it might need additional processing
+                  console.log('Output does not appear to be a direct JSON array');
+                  // Try to extract what looks like JSON
+                  const jsonMatch = dryRunModeOutput.match(/\[.*\]/s);
+                  if (jsonMatch) {
+                    invalidRepositoriesData = JSON.parse(jsonMatch[0]);
+                  } else {
+                    console.error('Could not find JSON array in output');
+                  }
+                }
+                
+                if (invalidRepositoriesData) {
+                  console.log(`Found ${invalidRepositoriesData.length} invalid repositories from dry_run_mode`);
+                }
+              } catch (error) {
+                console.error('Error parsing invalid repositories from dry_run_mode:', error.message);
+                console.error('Raw output:', dryRunModeOutput);
+              }
+            } else {
+              console.log('No invalid repositories data');
+            }
+            
             // Prepare parameters for comment creation
             const params = {
               enableSecretScanning: ${{ matrix.enable_secret_scanning }},
@@ -365,6 +534,11 @@ jobs:
               instanceName: '${{ matrix.instance_name }}',
               dryRun: dryRun
             };
+            
+            // Add invalid repositories to params if any were detected
+            if (invalidRepositoriesData && invalidRepositoriesData.length > 0) {
+              params.invalidRepositories = invalidRepositoriesData;
+            }
             
             // Add new committers list if available
             const newCommittersListStr = '${{ steps.check_licenses.outputs.new_committers_list }}';
