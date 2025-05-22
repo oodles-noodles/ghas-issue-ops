@@ -11,6 +11,7 @@ A GitHub Actions workflow that uses IssueOps to automatically enable GitHub Adva
 - **Dry run capability**: Preview what would happen without actually making changes
 - **Enterprise Server support**: Works with GitHub Enterprise Server instances
 - **Multi-instance support**: Configure and manage multiple GHES instances
+- **Reusable workflow architecture**: Implementation split into caller and reusable workflows for better maintainability and reuse
 
 ## How It Works
 
@@ -105,6 +106,29 @@ The workflow uses:
 - **GitHub Actions matrix jobs** to parallelize enablement across different Enterprise instances
 - **GitHub CLI (gh)** for API interactions with both GitHub.com and GitHub Enterprise Server
 - **GitHub Enterprise Cloud API** for license information
+- **Reusable Workflows**: Implementation split into caller and reusable workflows for better maintainability and reuse
+- **Reusable workflows**: Split implementation into caller and reusable workflow components
+
+### Workflow Architecture
+
+The implementation is split into two workflow files:
+
+1. **Caller Workflow** (`ghas-enablement.yml`):
+   - Triggered by issues with the 'ghas-enablement' label
+   - Parses the issue body to extract required parameters
+   - Calls the reusable workflow with extracted parameters
+   
+2. **Reusable Workflow** (`ghas-enablement-action.yml`):
+   - Accepts inputs from the caller workflow
+   - Contains the core implementation logic
+   - Groups repositories by GHES instance
+   - Performs license checks and enables GHAS features
+   - Posts results back to the triggering issue
+
+This architecture allows:
+- Other repositories to reuse the core GHAS enablement logic
+- Easier maintenance by separating triggering mechanism from implementation
+- Better testing and development of the core functionality
 
 The workflow is structured to be maintainable and adaptable:
 - **Centralized configuration** with `config.yaml` for managing multiple GHES instances

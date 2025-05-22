@@ -7,6 +7,7 @@ This directory contains JavaScript helper functions used by the GHAS Enablement 
 The `ghas-helpers.js` file provides modular functions that handle different aspects of the GHAS enablement process:
 
 - **parseIssueBody**: Parses the issue body to extract repositories, feature selections, and license requirements.
+- **parseIssueAndSetOutputs**: Combines issue parsing and output setting in a single function for cleaner workflow files.
 - **parseConfigAndGroupRepos**: Parses the config.yaml file and groups repositories by their hostname, matching them with the appropriate GHES instance configuration.
 - **determineTokenName**: Determines which authentication token name to use based on the matrix context.
 - **getTokenValue**: Dynamically retrieves the appropriate token value from available secrets based on the token name.

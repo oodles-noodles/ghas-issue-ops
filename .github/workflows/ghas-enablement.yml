@@ -5,13 +5,17 @@ on:
     types: [opened]
 
 jobs:
-  process-ghas-request:
+  parse-issue:
     if: contains(github.event.issue.labels.*.name, 'ghas-enablement')
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     outputs:
-      matrix_json: ${{ steps.group_repos.outputs.matrix_json }}
+      repositories: ${{ steps.parse_issue.outputs.repositories }}
+      enable_secret_scanning: ${{ steps.parse_issue.outputs.enable_secret_scanning }}
+      enable_code_scanning: ${{ steps.parse_issue.outputs.enable_code_scanning }}
+      enable_dependabot_alerts: ${{ steps.parse_issue.outputs.enable_dependabot_alerts }}
+      min_remaining_licenses: ${{ steps.parse_issue.outputs.min_remaining_licenses }}
+      skip_license_check: ${{ steps.parse_issue.outputs.skip_license_check }}
+      dry_run: ${{ steps.parse_issue.outputs.dry_run }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,343 +31,26 @@ jobs:
             const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
             const issue = context.payload.issue;
             
-            // Use helper function to parse the issue body
-            const parsedData = helpers.parseIssueBody(issue.body);
-            
-            // Set outputs for use in later steps
-            core.setOutput('repositories', JSON.stringify(parsedData.repositories));
-            core.setOutput('enable_secret_scanning', parsedData.features.enableSecretScanning);
-            core.setOutput('enable_code_scanning', parsedData.features.enableCodeScanning);
-            core.setOutput('enable_dependabot_alerts', parsedData.features.enableDependabotAlerts);
-            core.setOutput('min_remaining_licenses', parsedData.minRemainingLicenses);
-            core.setOutput('skip_license_check', parsedData.skipLicenseCheck);
-            core.setOutput('dry_run', parsedData.dryRun);
-            
-            return parsedData;
-      
-      - name: Parse config.yaml and group repositories by GHES instance
-        id: group_repos
-        uses: actions/github-script@v7
-        env:
-          GHES_API_TOKEN_1: ${{ secrets.GHES_API_TOKEN_1 }}
-          GHES_API_TOKEN_2: ${{ secrets.GHES_API_TOKEN_2 }}
-          GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
-        with:
-          script: |
-            const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
-            
-            // Get repositories and feature flags from previous step
-            const repositoriesJson = '${{ steps.parse_issue.outputs.repositories }}';
-            const enableSecretScanning = ${{ steps.parse_issue.outputs.enable_secret_scanning }};
-            const enableCodeScanning = ${{ steps.parse_issue.outputs.enable_code_scanning }};
-            const enableDependabotAlerts = ${{ steps.parse_issue.outputs.enable_dependabot_alerts }};
-            const minRemainingLicenses = ${{ steps.parse_issue.outputs.min_remaining_licenses }};
-            const skipLicenseCheck = ${{ steps.parse_issue.outputs.skip_license_check }};
-            const dryRun = ${{ steps.parse_issue.outputs.dry_run }};
-            
-            // Make tokens available to the helper script
-            // This is needed for org URL processing
-            process.env.GH_ENTERPRISE_TOKEN = process.env.GHES_API_TOKEN_1;
-            
-            // Use helper function to parse config and group repositories
-            const matrixItems = helpers.parseConfigAndGroupRepos(
-              repositoriesJson, 
-              enableSecretScanning, 
-              enableCodeScanning, 
-              enableDependabotAlerts, 
-              minRemainingLicenses
-            );
-            
-            // Add skipLicenseCheck and dryRun to each matrix item
-            matrixItems.forEach(item => {
-              item.skip_license_check = skipLicenseCheck;
-              item.dry_run = dryRun;
-            });
-            
-            // Save the matrix JSON for the next job
-            core.setOutput('matrix_json', JSON.stringify(matrixItems));
+            // Use helper function to parse the issue body and set outputs
+            return helpers.parseIssueAndSetOutputs(issue, core);
+  
+  call-ghas-enablement:
+    needs: parse-issue
+    uses: ./.github/workflows/ghas-enablement-action.yml
+    with:
+      repositories: ${{ needs.parse-issue.outputs.repositories }}
+      enable_secret_scanning: ${{ needs.parse-issue.outputs.enable_secret_scanning == 'true' }}
+      enable_code_scanning: ${{ needs.parse-issue.outputs.enable_code_scanning == 'true' }}
+      enable_dependabot_alerts: ${{ needs.parse-issue.outputs.enable_dependabot_alerts == 'true' }}
+      min_remaining_licenses: ${{ needs.parse-issue.outputs.min_remaining_licenses }}
+      skip_license_check: ${{ needs.parse-issue.outputs.skip_license_check == 'true' }}
+      dry_run: ${{ needs.parse-issue.outputs.dry_run == 'true' }}
+      issue_number: ${{ github.event.issue.number }}
+    secrets:
+      GHES_API_TOKEN_1: ${{ secrets.GHES_API_TOKEN_1 }}
+      GHES_API_TOKEN_2: ${{ secrets.GHES_API_TOKEN_2 }}
+      GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  enable-ghas-for-instances:
-    needs: process-ghas-request
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    strategy:
-      matrix:
-        include: ${{ fromJson(needs.process-ghas-request.outputs.matrix_json) }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Install dependencies
-        run: npm install js-yaml
-      
-      - name: Check license availability
-        id: check_licenses
-        uses: actions/github-script@v7
-        env:
-          ENTERPRISE_URL: ${{ matrix.api_url }}
-          ENTERPRISE_NAME: ${{ matrix.instance_name }}
-          MIN_REMAINING_LICENSES: ${{ matrix.min_remaining_licenses }}
-          AUTH_VAR: ${{ matrix.auth_var }}
-          GH_ENTERPRISE_TOKEN: ${{ secrets[matrix.auth_var] }}
-          GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
-        with:
-          script: |
-            const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
-            
-            // Check if we should skip the license check
-            const skipCheck = ${{ matrix.skip_license_check }};
-            console.log(`Skip license check: ${skipCheck ? 'Yes' : 'No'}`);
-            
-            // Check if this is a dry run
-            const dryRun = ${{ matrix.dry_run }};
-            if (dryRun) {
-              console.log('🔍 DRY RUN MODE: Yes');
-              console.log('=======================================');
-              console.log('🚨 ATTENTION: This is a DRY RUN 🚨');
-              console.log('No changes will be applied to repositories');
-              console.log('This run will only analyze and report what would happen');
-              console.log('=======================================');
-            } else {
-              console.log('Dry run mode: No - Changes WILL be applied');
-            }
-            
-            // Get the list of repositories to check for license impact
-            const repositories = ${{ toJson(matrix.repositories) }};
-            
-            // Use improved helper function that handles skipping internally and performs committer analysis
-            const licenseInfo = helpers.checkLicenseAvailability(process.env, skipCheck, repositories);
-            
-            // Create a license info object for sharing with subsequent steps
-            const licenseInfoForSharing = {
-              availableLicenses: licenseInfo.availableLicenses,
-              totalLicenses: licenseInfo.totalLicenses,
-              usedLicenses: licenseInfo.usedLicenses,
-              newCommitters: licenseInfo.newCommitters || 0,
-              estimatedLicensesNeeded: licenseInfo.estimatedLicensesNeeded || 0,
-              hasEnoughLicenses: licenseInfo.hasEnoughLicenses,
-              skipLicenseCheck: licenseInfo.skipLicenseCheck
-            };
-            
-            // Pass the newCommittersList if available
-            if (licenseInfo.newCommittersList) {
-              licenseInfoForSharing.newCommittersList = licenseInfo.newCommittersList;
-            }
-            
-            // Store the license info for the update_issue step
-            core.exportVariable('LICENSE_INFO_JSON', JSON.stringify(licenseInfoForSharing));
-            
-            // Set outputs for use in later steps
-            core.setOutput('available_licenses', licenseInfo.availableLicenses);
-            core.setOutput('total_licenses', licenseInfo.totalLicenses);
-            core.setOutput('used_licenses', licenseInfo.usedLicenses);
-            core.setOutput('new_committers', licenseInfo.newCommitters);
-            core.setOutput('estimated_licenses_needed', licenseInfo.estimatedLicensesNeeded);
-            core.setOutput('has_enough_licenses', licenseInfo.hasEnoughLicenses.toString());
-            core.setOutput('skip_license_check', licenseInfo.skipLicenseCheck);
-            // We stringified the boolean value to ensure consistent type matching in conditions
-            core.setOutput('dry_run', dryRun ? 'true' : 'false');
-            
-            // Output the list of new committers if available
-            if (licenseInfo.newCommittersList && licenseInfo.newCommittersList.length > 0) {
-              core.setOutput('new_committers_list', JSON.stringify(licenseInfo.newCommittersList));
-            }
-      
-            # Display a message when in dry run mode
-      - name: Dry Run Mode - No Changes
-        if: steps.check_licenses.outputs.has_enough_licenses == 'true' && steps.check_licenses.outputs.dry_run == 'true'
-        run: |
-          echo "🔍 DRY RUN MODE ACTIVE: No changes will be made to repositories. This is only a simulation."
-        
-      # This step will be skipped in dry run mode
-      - name: Enable GHAS Features
-        id: enable_features
-        if: steps.check_licenses.outputs.has_enough_licenses == 'true' && steps.check_licenses.outputs.dry_run != 'true'
-        env:
-          ENTERPRISE_URL: ${{ matrix.api_url }}
-          REPOSITORIES: ${{ toJson(matrix.repositories) }}
-          ENABLE_SECRET_SCANNING: ${{ matrix.enable_secret_scanning }}
-          ENABLE_CODE_SCANNING: ${{ matrix.enable_code_scanning }}
-          ENABLE_DEPENDABOT_ALERTS: ${{ matrix.enable_dependabot_alerts }}
-          MIN_REMAINING_LICENSES: ${{ matrix.min_remaining_licenses }}
-        run: |
-          export GH_ENTERPRISE_TOKEN="${{ secrets[matrix.auth_var] }}"
-          if [[ "$ENABLE_SECRET_SCANNING" != "true" && "$ENABLE_CODE_SCANNING" != "true" && "$ENABLE_DEPENDABOT_ALERTS" != "true" ]]; then
-            echo "No GHAS features selected for enablement"
-            exit 0
-          fi
-          
-          echo "Enabling selected GHAS features for repositories"
-          # Extract hostname from ENTERPRISE_URL for GitHub CLI
-          HOSTNAME=$(echo $ENTERPRISE_URL | sed -E 's|https?://([^/]+)/.*|\1|' | sed 's/api\.//')
-          echo "Using hostname: $HOSTNAME"
-          
-          repos=$(echo $REPOSITORIES | jq -r '.[]')
-          enabled_repos=()
-          
-          for repo in $repos; do
-            if [ -n "$repo" ]; then
-              echo "Processing repository: $repo"
-              # Extract the org and repo_name from the URL path
-              # Format: https://hostname/org/repo or http://hostname/org/repo
-              # Use sed to extract just org/repo part from the full URL
-              repo_path=$(echo "$repo" | sed -E 's|https?://[^/]+/(.+)|\1|')
-              IFS='/' read -r org repo_name <<< "$repo_path"
-              
-              # Validate that we have both org and repo_name
-              if [[ -z "$org" || -z "$repo_name" ]]; then
-                echo "Error: Could not extract organization and repository name from $repo"
-                continue
-              fi
-              
-              echo "Extracted org: $org, repo_name: $repo_name from $repo"
-              
-              # First check if Advanced Security is enabled on the repository
-              echo "Checking if Advanced Security is enabled for $repo"
-              repo_info=$(gh api -H "Accept: application/vnd.github+json" "/repos/$org/$repo_name" \
-                --hostname $HOSTNAME --jq .security_and_analysis 2>/dev/null || echo "{}")
-              
-              # Check if advanced security is enabled
-              advanced_security_enabled=$(echo $repo_info | jq -r '.advanced_security.status // "disabled"')
-              
-              if [[ "$advanced_security_enabled" != "enabled" ]]; then
-                echo "Advanced Security is not enabled for $repo. Enabling it now..."
-                echo '{"security_and_analysis":{"advanced_security":{"status":"enabled"}}}' | \
-                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
-                  --hostname $HOSTNAME \
-                  --input -
-                
-                echo "Advanced Security has been enabled for $repo"
-              else
-                echo "Advanced Security is already enabled for $repo"
-              fi
-              
-              # If Code Scanning selected, enable using default setup
-              # Note: Default setup also enables Secret Scanning, so we skip the separate Secret Scanning enablement
-              if [[ "$ENABLE_CODE_SCANNING" == "true" ]]; then
-                echo "Enabling Code Scanning with default setup for $repo"
-                echo '{"state":"configured"}' | \
-                gh api -X PUT -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name/code-scanning/default-setup" \
-                  --hostname $HOSTNAME \
-                  --input -
-                  
-                enabled_repos+=("$repo")
-                continue # Skip individual feature enablement since default setup is comprehensive
-              fi
-              
-              # If Secret Scanning selected (and we're not using default setup)
-              if [[ "$ENABLE_SECRET_SCANNING" == "true" ]]; then
-                echo "Enabling Secret Scanning for $repo"
-                echo '{"security_and_analysis":{"secret_scanning":{"status":"enabled"}}}' | \
-                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
-                  --hostname $HOSTNAME \
-                  --input -
-              fi
-              
-              # If Dependabot Alerts selected
-              if [[ "$ENABLE_DEPENDABOT_ALERTS" == "true" ]]; then
-                echo "Enabling Dependabot Alerts for $repo"
-                echo '{"security_and_analysis":{"vulnerability_alerts":{"status":"enabled"}}}' | \
-                gh api -X PATCH -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" "/repos/$org/$repo_name" \
-                  --hostname $HOSTNAME \
-                  --input -
-              fi
-              
-              enabled_repos+=("$repo")
-              echo "GHAS features enabled for $repo"
-            fi
-          done
-          
-          # Store enabled repos for reporting
-          echo "enabled_repos=$(echo "${enabled_repos[@]}" | jq -R -s -c 'split(" ")')" >> $GITHUB_OUTPUT
-      
-      - name: Update issue with results
-        id: update_issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
-            
-            // All license check information comes from single step now
-            const hasEnoughLicenses = '${{ steps.check_licenses.outputs.has_enough_licenses }}' === 'true';
-            const skipLicenseCheck = '${{ steps.check_licenses.outputs.skip_license_check }}' === 'true';
-            const dryRun = '${{ steps.check_licenses.outputs.dry_run }}' === 'true';
-            
-            // Parse issue body to identify original inputs for better context
-            const issue = context.payload.issue;
-            const parsedData = helpers.parseIssueBody(issue.body);
-            const originalRepos = parsedData.repositories;
-            
-            // Get the current hostname for filtering
-            const currentHostname = "${{ matrix.hostname }}";
-            
-            // Identify which inputs were org URLs and filter to only those for this enterprise
-            const orgUrls = originalRepos.filter(url => {
-              try {
-                // Check if it's an org URL
-                if (helpers.isOrganizationUrl(url)) {
-                  // Extract hostname and check if it matches current enterprise
-                  const urlObj = new URL(url);
-                  return urlObj.hostname === currentHostname;
-                }
-                return false;
-              } catch (error) {
-                console.error(`Invalid URL: ${url}`, error.message);
-                return false;
-              }
-            });
-            
-            console.log(`Found ${orgUrls.length} organization URLs for hostname ${currentHostname}`);
-            
-            // Prepare parameters for comment creation
-            const params = {
-              enableSecretScanning: ${{ matrix.enable_secret_scanning }},
-              enableCodeScanning: ${{ matrix.enable_code_scanning }},
-              enableDependabotAlerts: ${{ matrix.enable_dependabot_alerts }},
-              repositories: ${{ toJson(matrix.repositories) }},
-              hasEnoughLicenses: hasEnoughLicenses,
-              availableLicenses: parseInt(${{ steps.check_licenses.outputs.available_licenses }}),
-              totalLicenses: parseInt(${{ steps.check_licenses.outputs.total_licenses }}),
-              usedLicenses: parseInt(${{ steps.check_licenses.outputs.used_licenses }}),
-              newCommitters: parseInt(${{ steps.check_licenses.outputs.new_committers }} || '0'),
-              estimatedLicensesNeeded: parseInt(${{ steps.check_licenses.outputs.estimated_licenses_needed }} || '0'),
-              skipLicenseCheck: skipLicenseCheck,
-              minRemainingLicenses: ${{ matrix.min_remaining_licenses }},
-              hostname: currentHostname,
-              instanceName: "${{ matrix.instance_name }}",
-              dryRun: dryRun
-            };
-            
-            // Add new committers list if available
-            const newCommittersListStr = '${{ steps.check_licenses.outputs.new_committers_list }}';
-            if (newCommittersListStr) {
-              try {
-                params.newCommittersList = JSON.parse(newCommittersListStr);
-              } catch (error) {
-                console.error('Error parsing new committers list:', error.message);
-              }
-            }
-            
-            // Add filtered org URLs to params if any were detected
-            if (orgUrls.length > 0) {
-              params.organizationUrls = orgUrls;
-            }
-            
-            // Create comment text
-            const comment = helpers.createResultsComment(params);
-            
-            // Post comment to the issue
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
-            
-            // If not enough licenses, exit early
-            if (!params.hasEnoughLicenses) {
-              return;
-            }
+
 

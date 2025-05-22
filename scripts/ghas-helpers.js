@@ -682,8 +682,30 @@ function parseIssueBody(body) {
   };
 }
 
+/**
+ * Parses the issue body and sets job outputs for use in GitHub Actions
+ * @param {Object} issue - The issue object from GitHub context
+ * @param {Object} core - The GitHub Actions core object for setting outputs
+ * @returns {Object} Parsed data including repositories and feature flags
+ */
+function parseIssueAndSetOutputs(issue, core) {
+  const parsedData = parseIssueBody(issue.body);
+  
+  // Set outputs for use in later steps
+  core.setOutput('repositories', JSON.stringify(parsedData.repositories));
+  core.setOutput('enable_secret_scanning', parsedData.features.enableSecretScanning);
+  core.setOutput('enable_code_scanning', parsedData.features.enableCodeScanning);
+  core.setOutput('enable_dependabot_alerts', parsedData.features.enableDependabotAlerts);
+  core.setOutput('min_remaining_licenses', parsedData.minRemainingLicenses);
+  core.setOutput('skip_license_check', parsedData.skipLicenseCheck);
+  core.setOutput('dry_run', parsedData.dryRun);
+  
+  return parsedData;
+}
+
 module.exports = {
   parseIssueBody,
+  parseIssueAndSetOutputs,
   parseConfigAndGroupRepos,
   determineTokenName,
   getTokenValue,
@@ -692,5 +714,6 @@ module.exports = {
   fetchOrganizationRepos,
   isOrganizationUrl,
   fetchRepoCommitters,
-  getAllUniqueCommitters
+  getAllUniqueCommitters,
+  parseIssueAndSetOutputs
 };
