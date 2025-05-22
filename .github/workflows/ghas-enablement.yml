@@ -35,6 +35,8 @@ jobs:
             return helpers.parseIssueAndSetOutputs(issue, core);
   
   call-ghas-enablement:
+    permissions:
+      issues: write
     needs: parse-issue
     uses: ./.github/workflows/ghas-enablement-action.yml
     with:
