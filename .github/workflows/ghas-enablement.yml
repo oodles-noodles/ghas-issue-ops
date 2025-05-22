@@ -37,7 +37,7 @@ jobs:
       issues: write
       contents: read
     needs: parse-issue
-    uses: ./.github/workflows/ghas-enablement-action.yml
+    uses: expert-services/reusable-workflows/.github/workflows/ghas-enablement.yml@main
     with:
       repositories: ${{ needs.parse-issue.outputs.repositories }}
       enable_secret_scanning: ${{ needs.parse-issue.outputs.enable_secret_scanning == 'true' }}
