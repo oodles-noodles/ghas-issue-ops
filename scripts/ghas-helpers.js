@@ -126,12 +126,21 @@ function fetchOrganizationRepos(orgUrl, token) {
       console.error(`Invalid organization URL: ${orgUrl}. Could not extract organization name.`);
       return [];
     }
+
+    console.log(`🔍 DEBUG: Fetching repositories for organization: ${orgPath} from ${hostname}`);
+    console.log(`🔍 DEBUG: Using token: ${token ? token.substring(0, 8) + '...' : 'NO_TOKEN'}`);
     
-    console.log(`Fetching repositories for organization: ${orgPath} from ${hostname}`);
+    if (!token) {
+      console.error(`❌ No authentication token provided for ${hostname}`);
+      console.error(`   Cannot fetch repositories from organization: ${orgPath}`);
+      return [];
+    }
     
-    // Use GitHub CLI to fetch repositories
-    // Note: This may need pagination for orgs with many repos
-    const cmd = `gh api -H "Accept: application/vnd.github+json" "/orgs/${orgPath}/repos?per_page=100" --hostname "${hostname}"`;
+    // Use GitHub CLI to fetch repositories with pagination
+    // The --paginate flag automatically handles pagination to get all repositories
+    const cmd = `gh api -H "Accept: application/vnd.github+json" "/orgs/${orgPath}/repos?per_page=100" --hostname "${hostname}" --paginate`;
+    
+    console.log(`🔍 DEBUG: Executing command: ${cmd}`);
     
     const reposDataRaw = execSync(cmd, {
       env: { ...process.env, GH_TOKEN: token },
@@ -150,10 +159,30 @@ function fetchOrganizationRepos(orgUrl, token) {
       return `https://${hostname}/${repo.full_name}`;
     });
     
-    console.log(`Found ${repoUrls.length} repositories in organization ${orgPath}`);
+    console.log(`✅ Found ${repoUrls.length} repositories in organization ${orgPath}`);
+    
+    // Log first few repositories for debugging (but not all to avoid log spam)
+    if (repoUrls.length > 0) {
+      const sampleRepos = repoUrls.slice(0, Math.min(5, repoUrls.length));
+      console.log(`🔍 DEBUG: Sample repositories:`, sampleRepos);
+      if (repoUrls.length > 5) {
+        console.log(`🔍 DEBUG: ... and ${repoUrls.length - 5} more repositories`);
+      }
+    }
+    
     return repoUrls;
   } catch (error) {
-    console.error(`Error fetching repositories for organization ${orgUrl}:`, error.message);
+    console.error(`❌ Error fetching repositories for organization ${orgUrl}:`, error.message);
+    
+    // Provide more specific error information
+    if (error.message.includes('404')) {
+      console.error(`   Organization '${orgUrl}' not found or not accessible with provided token`);
+    } else if (error.message.includes('403')) {
+      console.error(`   Access denied. Token may lack permissions to access organization '${orgUrl}'`);
+    } else if (error.message.includes('401')) {
+      console.error(`   Authentication failed. Token may be invalid or expired`);
+    }
+    
     return [];
   }
 }
