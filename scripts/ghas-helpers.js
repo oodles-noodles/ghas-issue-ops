@@ -517,11 +517,11 @@ function getTokenValue(tokenName, secrets) {
  * @param {boolean} features.enableCodeScanning - Whether code scanning is selected
  * @param {boolean} features.enableDependabotAlerts - Whether dependabot alerts is selected
  * @returns {Object} License information and availability status including:
- *   - totalLicenses: Total number of GHAS licenses
+ *   - totalLicenses: Total number of GHAS licenses (0 or undefined indicates unlimited)
  *   - usedLicenses: Number of licenses currently in use
- *   - availableLicenses: Number of licenses available after considering new committers
+ *   - availableLicenses: Number of licenses available after considering new committers (Number.MAX_SAFE_INTEGER for unlimited)
  *   - minRemainingLicenses: Minimum number of licenses that must remain unused
- *   - hasEnoughLicenses: Boolean indicating if there are enough licenses
+ *   - hasEnoughLicenses: Boolean indicating if there are enough licenses (always true for unlimited)
  *   - skipLicenseCheck: Boolean indicating if license check was skipped
  *   - currentGhasCommitters: Array of emails for committers already using GHAS licenses
  *   - newCommitters: Number of committers that would need new licenses
@@ -631,10 +631,11 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   const totalLicenses = ghasData.purchased_advanced_security_committers;
   const usedLicenses = ghasData.total_advanced_security_committers;
   
-  // Check if this is an unlimited license scenario (0 total licenses indicates unlimited)
-  const isUnlimitedLicenses = totalLicenses === 0;
+  // Check if this is an unlimited license scenario (0 or undefined total licenses indicates unlimited)
+  const isUnlimitedLicenses = totalLicenses === 0 || totalLicenses === undefined;
   if (isUnlimitedLicenses) {
-    console.log('Total licenses is 0 - treating as unlimited licenses available');
+    const reason = totalLicenses === 0 ? 'Total licenses is 0' : 'Total licenses is undefined';
+    console.log(`${reason} - treating as unlimited licenses available`);
   }
   
   // Extract all unique committer emails from repositories that already have GHAS enabled
