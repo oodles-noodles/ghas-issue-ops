@@ -755,13 +755,37 @@ function createResultsComment(params) {
       });
     }
     
-    // Display invalid repositories if any
+    // Display invalid organizations and repositories separately if any
     if (invalidRepositories && invalidRepositories.length > 0) {
-      comment += `\n### ⚠️ Invalid Repositories (Skipped)\n`;
+      // Separate invalid organizations from invalid repositories
+      const invalidOrganizations = [];
+      const invalidRepos = [];
+      
       invalidRepositories.forEach(item => {
-        comment += `- **${item.url}**\n  - Error: ${item.error}\n`;
+        if (isOrganizationUrl(item.url)) {
+          invalidOrganizations.push(item);
+        } else {
+          invalidRepos.push(item);
+        }
       });
-      comment += `\n`;
+      
+      // Display invalid organizations if any
+      if (invalidOrganizations.length > 0) {
+        comment += `\n### ⚠️ Invalid Organizations (Skipped)\n`;
+        invalidOrganizations.forEach(item => {
+          comment += `- **${item.url}**\n  - Error: ${item.error}\n`;
+        });
+        comment += `\n`;
+      }
+      
+      // Display invalid repositories if any
+      if (invalidRepos.length > 0) {
+        comment += `\n### ⚠️ Invalid Repositories (Skipped)\n`;
+        invalidRepos.forEach(item => {
+          comment += `- **${item.url}**\n  - Error: ${item.error}\n`;
+        });
+        comment += `\n`;
+      }
     }
     
     comment += `\n### ${invalidRepositories && invalidRepositories.length > 0 ? 'Valid ' : ''}Repositories${dryRun ? ' (No Changes Applied)' : ' Enabled'}\n`;

@@ -625,10 +625,24 @@ jobs:
             
             // Get invalid repositories from the parsing step (if any)
             const parsingInvalidRepos = ${{ toJson(matrix.parsing_invalid_repositories) }};
-            console.log(`Found ${parsingInvalidRepos.length} invalid repositories from parsing step`);
+            console.log(`Found ${parsingInvalidRepos.length} total invalid repositories from parsing step`);
+            
+            // Filter parsing invalid repositories to only include ones for this hostname
+            const currentHostname = '${{ matrix.hostname }}';
+            const filteredParsingInvalidRepos = parsingInvalidRepos.filter(item => {
+              try {
+                const itemHostname = new URL(item.url).hostname;
+                return itemHostname === currentHostname;
+              } catch (error) {
+                // If we can't parse the URL, include it for this hostname to be safe
+                console.warn(`Could not parse hostname from invalid URL: ${item.url}`);
+                return true;
+              }
+            });
+            console.log(`Found ${filteredParsingInvalidRepos.length} invalid repositories for hostname ${currentHostname}`);
             
             // Combine invalid repositories from parsing and enablement steps
-            let allInvalidRepositories = [...parsingInvalidRepos];
+            let allInvalidRepositories = [...filteredParsingInvalidRepos];
             if (invalidRepositoriesData && Array.isArray(invalidRepositoriesData)) {
               allInvalidRepositories = allInvalidRepositories.concat(invalidRepositoriesData);
             }
