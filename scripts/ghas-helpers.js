@@ -512,6 +512,10 @@ function getTokenValue(tokenName, secrets) {
  * @param {Object} env - Environment variables
  * @param {boolean} skipCheck - Whether to skip the license check
  * @param {Array} repositories - List of repositories to enable GHAS for (optional)
+ * @param {Object} features - Feature selection flags (optional)
+ * @param {boolean} features.enableSecretScanning - Whether secret scanning is selected
+ * @param {boolean} features.enableCodeScanning - Whether code scanning is selected
+ * @param {boolean} features.enableDependabotAlerts - Whether dependabot alerts is selected
  * @returns {Object} License information and availability status including:
  *   - totalLicenses: Total number of GHAS licenses
  *   - usedLicenses: Number of licenses currently in use
@@ -524,7 +528,7 @@ function getTokenValue(tokenName, secrets) {
  *   - newCommittersList: Array of committer emails that would need new licenses
  *   - estimatedLicensesNeeded: Number of new licenses that would be needed
  */
-function checkLicenseAvailability(env, skipCheck = false, repositories = []) {
+function checkLicenseAvailability(env, skipCheck = false, repositories = [], features = {}) {
   // If skipping check, return default values that indicate success
   if (skipCheck) {
     console.log('Skipping license check as requested');
@@ -558,19 +562,72 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = []) {
   const ghecHostname = new URL(ghecApiUrl).hostname.replace(/^api\./, '');
   
   // Get total and used GHAS licenses from GHEC API
-  const licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
-  
   // Determine the correct environment variable based on hostname
   // GitHub.com uses GH_TOKEN, GHES instances use GH_ENTERPRISE_TOKEN
   const isGitHubDotCom = ghecHostname === 'github.com';
   const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : ghecAuthVar;
   
-  const ghasDataRaw = execSync(licenseCmd, { 
-    env: { ...env, [tokenEnvVar]: ghecToken },
-    encoding: 'utf8'
-  });
+  let ghasData;
+  let licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
   
-  const ghasData = JSON.parse(ghasDataRaw);
+  try {
+    // First attempt: Try without advanced_security_product parameter
+    console.log('Attempting to fetch license data without advanced_security_product parameter...');
+    const ghasDataRaw = execSync(licenseCmd, { 
+      env: { ...env, [tokenEnvVar]: ghecToken },
+      encoding: 'utf8'
+    });
+    ghasData = JSON.parse(ghasDataRaw);
+    console.log('Successfully retrieved license data');
+  } catch (error) {
+    console.log('Initial license API call failed, checking for 422 error...');
+    
+    // Check if this is a 422 error indicating we need the advanced_security_product parameter
+    if (error.message && error.message.includes('422')) {
+      console.log('Detected 422 error - retrying with advanced_security_product parameter');
+      
+      // Determine the appropriate advanced_security_product based on selected features
+      let advancedSecurityProduct = null;
+      
+      if (features.enableSecretScanning && features.enableCodeScanning) {
+        // Both secret scanning and code scanning selected - use code_security (includes both)
+        advancedSecurityProduct = 'code_security';
+        console.log('Both Secret Scanning and Code Scanning selected - using code_security product');
+      } else if (features.enableSecretScanning) {
+        // Only secret scanning selected - use secret_protection
+        advancedSecurityProduct = 'secret_protection';
+        console.log('Only Secret Scanning selected - using secret_protection product');
+      } else if (features.enableCodeScanning) {
+        // Only code scanning selected - use code_security
+        advancedSecurityProduct = 'code_security';
+        console.log('Only Code Scanning selected - using code_security product');
+      } else {
+        // No specific GHAS features selected, default to code_security
+        advancedSecurityProduct = 'code_security';
+        console.log('No specific GHAS features selected - defaulting to code_security product');
+      }
+      
+      // Retry the API call with the advanced_security_product parameter
+      licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security?advanced_security_product=${advancedSecurityProduct}" --hostname "${ghecHostname}"`;
+      
+      try {
+        console.log(`Retrying license API call with advanced_security_product=${advancedSecurityProduct}...`);
+        const ghasDataRaw = execSync(licenseCmd, { 
+          env: { ...env, [tokenEnvVar]: ghecToken },
+          encoding: 'utf8'
+        });
+        ghasData = JSON.parse(ghasDataRaw);
+        console.log('Successfully retrieved license data with advanced_security_product parameter');
+      } catch (retryError) {
+        console.error('Failed to retrieve license data even with advanced_security_product parameter:', retryError.message);
+        throw retryError;
+      }
+    } else {
+      // Not a 422 error, re-throw the original error
+      console.error('License API call failed with non-422 error:', error.message);
+      throw error;
+    }
+  }
   const totalLicenses = ghasData.purchased_advanced_security_committers;
   const usedLicenses = ghasData.total_advanced_security_committers;
   

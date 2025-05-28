@@ -202,8 +202,15 @@ jobs:
             // Get the list of repositories to check for license impact
             const repositories = ${{ toJson(matrix.repositories) }};
             
+            // Prepare feature flags for license checking
+            const features = {
+              enableSecretScanning: ${{ matrix.enable_secret_scanning }},
+              enableCodeScanning: ${{ matrix.enable_code_scanning }},
+              enableDependabotAlerts: ${{ matrix.enable_dependabot_alerts }}
+            };
+            
             // Use improved helper function that handles skipping internally and performs committer analysis
-            const licenseInfo = helpers.checkLicenseAvailability(process.env, skipCheck, repositories);
+            const licenseInfo = helpers.checkLicenseAvailability(process.env, skipCheck, repositories, features);
             
             // Create a license info object for sharing with subsequent steps
             const licenseInfoForSharing = {
