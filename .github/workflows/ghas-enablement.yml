@@ -10,7 +10,7 @@ jobs:
     permissions:
       issues: write
       contents: read
-    uses: oodles-noodles/ghas-issues-ops/.github/workflows/ghas-enablement-action.yml@main
+    uses: oodles-noodles/ghas-issue-ops/.github/workflows/ghas-enablement-action.yml@main
     with:
       issue_number: ${{ github.event.issue.number }}
     secrets: inherit
