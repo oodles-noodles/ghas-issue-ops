@@ -737,7 +737,17 @@ jobs:
             
             // Add filtered org URLs to params if any were detected
             if (orgUrls.length > 0) {
-              params.organizationUrls = orgUrls;
+              // Filter out invalid organization URLs from the list to avoid showing them twice
+              // Invalid orgs will be shown in the "Invalid Organizations" section
+              const invalidOrgUrls = allInvalidRepositories
+                .filter(item => helpers.isOrganizationUrl(item.url))
+                .map(item => item.url);
+              
+              const validOrgUrls = orgUrls.filter(url => !invalidOrgUrls.includes(url));
+              
+              if (validOrgUrls.length > 0) {
+                params.organizationUrls = validOrgUrls;
+              }
             }
             
             // Create comment text
