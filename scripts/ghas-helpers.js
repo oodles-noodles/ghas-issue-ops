@@ -553,9 +553,8 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = []) {
   const ghecAuthVar = ghecConfig.auth_var;
   
   // Set the GHEC token for API calls
-  // Use the token that was already set as GH_ENTERPRISE_TOKEN
-  // The workflow will handle setting the right token value from the auth_var
-  const ghecToken = env.GH_ENTERPRISE_TOKEN;
+  // Use the token from the auth_var specified in the configuration
+  const ghecToken = env[ghecAuthVar];
   const ghecHostname = new URL(ghecApiUrl).hostname.replace(/^api\./, '');
   
   // Get total and used GHAS licenses from GHEC API
@@ -564,7 +563,7 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = []) {
   // Determine the correct environment variable based on hostname
   // GitHub.com uses GH_TOKEN, GHES instances use GH_ENTERPRISE_TOKEN
   const isGitHubDotCom = ghecHostname === 'github.com';
-  const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : 'GH_ENTERPRISE_TOKEN';
+  const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : ghecAuthVar;
   
   const ghasDataRaw = execSync(licenseCmd, { 
     env: { ...env, [tokenEnvVar]: ghecToken },
