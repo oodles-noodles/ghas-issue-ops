@@ -635,12 +635,65 @@ jobs:
             
             console.log(`Total invalid repositories to report: ${allInvalidRepositories.length}`);
             
+            // Get valid repositories from the dry run or enablement step outputs
+            let validRepositories = [];
+            const enableFeaturesValidOutput = '${{ steps.enable_features.outputs.enabled_repos }}';
+            const dryRunValidOutput = '${{ steps.dry_run_mode.outputs.valid_repos }}';
+            
+            if (dryRun && dryRunValidOutput && dryRunValidOutput !== '') {
+              try {
+                console.log('Getting valid repositories from dry run mode');
+                if (dryRunValidOutput.startsWith('[') && dryRunValidOutput.endsWith(']')) {
+                  validRepositories = JSON.parse(dryRunValidOutput);
+                } else {
+                  const jsonMatch = dryRunValidOutput.match(/\[.*\]/s);
+                  if (jsonMatch) {
+                    validRepositories = JSON.parse(jsonMatch[0]);
+                  }
+                }
+                console.log(`Found ${validRepositories.length} valid repositories from dry run`);
+              } catch (error) {
+                console.error('Error parsing valid repositories from dry run:', error.message);
+                // Fallback to original list minus invalid ones
+                const allRepos = ${{ toJson(matrix.repositories) }};
+                const invalidUrls = allInvalidRepositories.map(item => item.url);
+                validRepositories = allRepos.filter(repo => !invalidUrls.includes(repo));
+              }
+            } else if (!dryRun && enableFeaturesValidOutput && enableFeaturesValidOutput !== '') {
+              try {
+                console.log('Getting valid repositories from enable features step');
+                if (enableFeaturesValidOutput.startsWith('[') && enableFeaturesValidOutput.endsWith(']')) {
+                  validRepositories = JSON.parse(enableFeaturesValidOutput);
+                } else {
+                  const jsonMatch = enableFeaturesValidOutput.match(/\[.*\]/s);
+                  if (jsonMatch) {
+                    validRepositories = JSON.parse(jsonMatch[0]);
+                  }
+                }
+                console.log(`Found ${validRepositories.length} valid repositories from enablement`);
+              } catch (error) {
+                console.error('Error parsing valid repositories from enablement:', error.message);
+                // Fallback to original list minus invalid ones
+                const allRepos = ${{ toJson(matrix.repositories) }};
+                const invalidUrls = allInvalidRepositories.map(item => item.url);
+                validRepositories = allRepos.filter(repo => !invalidUrls.includes(repo));
+              }
+            } else {
+              console.log('No valid repositories output available, filtering from original list');
+              // Fallback: filter out invalid repositories from the original matrix repositories
+              const allRepos = ${{ toJson(matrix.repositories) }};
+              const invalidUrls = allInvalidRepositories.map(item => item.url);
+              validRepositories = allRepos.filter(repo => !invalidUrls.includes(repo));
+            }
+            
+            console.log(`Final valid repositories count: ${validRepositories.length}`);
+            
             // Prepare parameters for comment creation
             const params = {
               enableSecretScanning: ${{ matrix.enable_secret_scanning }},
               enableCodeScanning: ${{ matrix.enable_code_scanning }},
               enableDependabotAlerts: ${{ matrix.enable_dependabot_alerts }},
-              repositories: ${{ toJson(matrix.repositories) }},
+              repositories: validRepositories, // Use filtered valid repositories instead of all repositories
               hasEnoughLicenses: hasEnoughLicenses,
               availableLicenses: parseInt('${{ steps.check_licenses.outputs.available_licenses || 0 }}'),
               totalLicenses: parseInt('${{ steps.check_licenses.outputs.total_licenses || 0 }}'),
