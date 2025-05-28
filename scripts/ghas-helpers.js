@@ -214,24 +214,47 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
     // Find tokens for each hostname
     const tokensByHostname = {};
     
+    console.log(`🔍 DEBUG: Processing ${orgUrls.length} organization URLs`);
+    console.log(`🔍 DEBUG: Available environment variables: ${Object.keys(process.env).filter(k => k.includes('TOKEN')).join(', ')}`);
+    console.log(`🔍 DEBUG: Specifically checking for: GHES_API_TOKEN_1=${process.env.GHES_API_TOKEN_1 ? 'SET' : 'NOT_SET'}, GHES_API_TOKEN_2=${process.env.GHES_API_TOKEN_2 ? 'SET' : 'NOT_SET'}, GH_ENTERPRISE_TOKEN_CLOUD=${process.env.GH_ENTERPRISE_TOKEN_CLOUD ? 'SET' : 'NOT_SET'}`);
+    
     // Process GHES instances
     if (config.ghes_instances && Array.isArray(config.ghes_instances)) {
+      console.log(`🔍 DEBUG: Processing ${config.ghes_instances.length} GHES instances`);
       for (const instance of config.ghes_instances) {
         try {
           const apiUrl = new URL(instance.api_url);
           const hostname = apiUrl.hostname.replace(/^api\./, '');
-          tokensByHostname[hostname] = process.env[instance.auth_var];
+          const tokenValue = process.env[instance.auth_var];
+          tokensByHostname[hostname] = tokenValue;
+          
+          console.log(`🔍 DEBUG: Instance '${instance.name}' mapping:`);
+          console.log(`   API URL: ${instance.api_url}`);
+          console.log(`   Hostname: ${hostname}`);
+          console.log(`   Auth var: ${instance.auth_var}`);
+          console.log(`   Token exists: ${tokenValue ? 'YES' : 'NO'}`);
+          console.log(`   Token preview: ${tokenValue ? tokenValue.substring(0, 8) + '...' : 'undefined'}`);
         } catch (error) {
           console.error(`Error processing instance config:`, error.message);
         }
       }
     }
     
+    console.log(`🔍 DEBUG: Final tokensByHostname mapping:`);
+    Object.entries(tokensByHostname).forEach(([hostname, token]) => {
+      console.log(`   ${hostname} -> ${token ? 'HAS_TOKEN' : 'NO_TOKEN'}`);
+    });
+    
     // Process each org URL
     orgUrls.forEach(orgUrl => {
       try {
         const hostname = new URL(orgUrl).hostname;
         const token = tokensByHostname[hostname];
+        
+        console.log(`🔍 DEBUG: Processing org URL: ${orgUrl}`);
+        console.log(`   Extracted hostname: ${hostname}`);
+        console.log(`   Looking for token in tokensByHostname...`);
+        console.log(`   Token found: ${token ? 'YES' : 'NO'}`);
         
         if (!token) {
           // Find which auth_var should be used for this hostname
@@ -246,8 +269,10 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
           
           console.error(`❌ No token found for hostname ${hostname}`);
           console.error(`   Expected environment variable: ${matchingInstance?.auth_var || 'UNKNOWN'}`);
+          console.error(`   Environment variable value: ${process.env[matchingInstance?.auth_var] ? 'SET (but not in tokensByHostname)' : 'NOT SET'}`);
+          console.error(`   Available hostnames in tokensByHostname: ${Object.keys(tokensByHostname).join(', ')}`);
           console.error(`   This will prevent organization URL expansion for: ${orgUrl}`);
-          console.error(`   Please ensure the token is configured in your workflow secrets.`);
+          console.error(`   Please ensure the token is configured in your workflow secrets and environment variables.`);
           return;
         }
         

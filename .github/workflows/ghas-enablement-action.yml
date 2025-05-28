@@ -109,6 +109,10 @@ jobs:
       - name: Parse config.yaml and group repositories by GHES instance
         id: group_repos
         uses: actions/github-script@v7
+        env:
+          GHES_API_TOKEN_1: ${{ secrets.GHES_API_TOKEN_1 }}
+          GHES_API_TOKEN_2: ${{ secrets.GHES_API_TOKEN_2 }}
+          GH_ENTERPRISE_TOKEN_CLOUD: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
         with:
           script: |
             const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
