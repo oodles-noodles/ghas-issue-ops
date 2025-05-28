@@ -121,7 +121,7 @@ function getAllUniqueCommitters(repositories, tokensByHostname) {
  * Fetches all repositories for a given organization URL
  * @param {string} orgUrl - The URL of the organization
  * @param {string} token - The token for authentication
- * @returns {Array} Array of repository URLs
+ * @returns {Object} Object with success flag, repositories array, and error info
  */
 function fetchOrganizationRepos(orgUrl, token) {
   try {
@@ -134,7 +134,11 @@ function fetchOrganizationRepos(orgUrl, token) {
     
     if (!orgPath) {
       console.error(`Invalid organization URL: ${orgUrl}. Could not extract organization name.`);
-      return [];
+      return {
+        success: false,
+        repositories: [],
+        error: 'Could not extract organization name from URL'
+      };
     }
 
     console.log(`🔍 DEBUG: Fetching repositories for organization: ${orgPath} from ${hostname}`);
@@ -143,7 +147,11 @@ function fetchOrganizationRepos(orgUrl, token) {
     if (!token) {
       console.error(`❌ No authentication token provided for ${hostname}`);
       console.error(`   Cannot fetch repositories from organization: ${orgPath}`);
-      return [];
+      return {
+        success: false,
+        repositories: [],
+        error: 'No authentication token provided'
+      };
     }
     
     // Use GitHub CLI to fetch repositories with pagination
@@ -172,7 +180,11 @@ function fetchOrganizationRepos(orgUrl, token) {
     const reposData = JSON.parse(reposDataRaw);
     if (!Array.isArray(reposData)) {
       console.error(`Invalid response when fetching repositories for ${orgPath}`);
-      return [];
+      return {
+        success: false,
+        repositories: [],
+        error: 'Invalid response format from API'
+      };
     }
     
     // Map to full repository URLs
@@ -192,20 +204,32 @@ function fetchOrganizationRepos(orgUrl, token) {
       }
     }
     
-    return repoUrls;
+    return {
+      success: true,
+      repositories: repoUrls,
+      error: null
+    };
   } catch (error) {
     console.error(`❌ Error fetching repositories for organization ${orgUrl}:`, error.message);
     
+    let errorMessage = error.message;
     // Provide more specific error information
     if (error.message.includes('404')) {
       console.error(`   Organization '${orgUrl}' not found or not accessible with provided token`);
+      errorMessage = 'Organization not found or not accessible with provided token';
     } else if (error.message.includes('403')) {
       console.error(`   Access denied. Token may lack permissions to access organization '${orgUrl}'`);
+      errorMessage = 'Access denied. Token may lack permissions to access organization';
     } else if (error.message.includes('401')) {
       console.error(`   Authentication failed. Token may be invalid or expired`);
+      errorMessage = 'Authentication failed. Token may be invalid or expired';
     }
     
-    return [];
+    return {
+      success: false,
+      repositories: [],
+      error: errorMessage
+    };
   }
 }
 
@@ -251,6 +275,7 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
   // Expand organization URLs to include all repositories
   const repositories = [];
   const orgUrls = [];
+  const invalidRepositories = [];
   
   // First pass: identify and separate org URLs from repo URLs
   inputRepos.forEach(url => {
@@ -328,13 +353,28 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
           console.error(`   Available hostnames in tokensByHostname: ${Object.keys(tokensByHostname).join(', ')}`);
           console.error(`   This will prevent organization URL expansion for: ${orgUrl}`);
           console.error(`   Please ensure the token is configured in your workflow secrets and environment variables.`);
+          
+          // Add to invalid repositories list
+          invalidRepositories.push({
+            url: orgUrl,
+            error: 'No authentication token available for this hostname'
+          });
           return;
         }
         
         // Fetch all repositories for this organization
-        const orgRepos = fetchOrganizationRepos(orgUrl, token);
-        console.log(`Adding ${orgRepos.length} repositories from organization URL: ${orgUrl}`);
-        repositories.push(...orgRepos);
+        const orgResult = fetchOrganizationRepos(orgUrl, token);
+        if (orgResult.success) {
+          console.log(`Adding ${orgResult.repositories.length} repositories from organization URL: ${orgUrl}`);
+          repositories.push(...orgResult.repositories);
+        } else {
+          console.error(`Failed to fetch repositories from organization: ${orgUrl}`);
+          // Add to invalid repositories list
+          invalidRepositories.push({
+            url: orgUrl,
+            error: orgResult.error
+          });
+        }
       } catch (error) {
         console.error(`Error processing org URL ${orgUrl}:`, error.message);
       }
@@ -344,7 +384,6 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
   // Group repositories by hostname
   const groupedRepos = {};
   const validRepositories = [];
-  const invalidRepositories = [];
   
   repositories.forEach(repo => {
     try {
