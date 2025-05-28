@@ -3,41 +3,43 @@ name: GHAS Enablement Action
 on:
   workflow_call:
     inputs:
+      # Option 1: Pass issue number and parse internally (recommended for issue-based workflows)
+      issue_number:
+        required: true
+        type: number
+        description: 'Issue number to parse configuration from'
+      # Option 2: Pass parsed data directly (for API calls or other triggers)
       repositories:
-        required: true
+        required: false
         type: string
-        description: 'JSON string of repositories to enable GHAS for'
+        description: 'JSON string of repositories to enable GHAS for (optional - will parse from issue if not provided)'
       enable_secret_scanning:
-        required: true
+        required: false
         type: boolean
-        description: 'Whether to enable secret scanning'
+        description: 'Whether to enable secret scanning (optional - will parse from issue if not provided)'
       enable_code_scanning:
-        required: true
+        required: false
         type: boolean
-        description: 'Whether to enable code scanning'
+        description: 'Whether to enable code scanning (optional - will parse from issue if not provided)'
       enable_dependabot_alerts:
-        required: true
+        required: false
         type: boolean
-        description: 'Whether to enable dependabot alerts'
+        description: 'Whether to enable dependabot alerts (optional - will parse from issue if not provided)'
       min_remaining_licenses:
         required: false
         type: number
         default: 1
-        description: 'Minimum remaining licenses to maintain'
+        description: 'Minimum remaining licenses to maintain (optional - will parse from issue if not provided)'
       skip_license_check:
         required: false
         type: boolean
         default: false
-        description: 'Whether to skip license checking'
+        description: 'Whether to skip license checking (optional - will parse from issue if not provided)'
       dry_run:
         required: false
         type: boolean
         default: false 
-        description: 'Whether to run in dry run mode (no changes will be made)'
-      issue_number:
-        required: true
-        type: number
-        description: 'Issue number that triggered the workflow'
+        description: 'Whether to run in dry run mode (optional - will parse from issue if not provided)'
     secrets:
       GHES_API_TOKEN_1:
         required: true
@@ -52,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: read  # Add permission to read issues
     outputs:
       matrix_json: ${{ steps.group_repos.outputs.matrix_json }}
     steps:
@@ -61,6 +64,48 @@ jobs:
       - name: Install dependencies
         run: npm install js-yaml
       
+      - name: Parse issue if repositories not provided
+        if: inputs.repositories == '' || inputs.repositories == null
+        id: parse_issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_ENTERPRISE_TOKEN_CLOUD }}
+          script: |
+            const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
+            
+            // Fetch the issue
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ inputs.issue_number }}
+            });
+            
+            // Parse issue and set outputs
+            const parsed = helpers.parseIssueAndSetOutputs(issue, core);
+            return parsed;
+      
+      - name: Use issue data or input data
+        id: config_data
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Use input data if provided, otherwise use parsed issue data
+            const repositories = '${{ inputs.repositories }}' || '${{ steps.parse_issue.outputs.repositories }}';
+            const enableSecretScanning = '${{ inputs.enable_secret_scanning }}' !== '' && '${{ inputs.enable_secret_scanning }}' !== 'false' ? '${{ inputs.enable_secret_scanning }}' === 'true' : '${{ steps.parse_issue.outputs.enable_secret_scanning }}' === 'true';
+            const enableCodeScanning = '${{ inputs.enable_code_scanning }}' !== '' && '${{ inputs.enable_code_scanning }}' !== 'false' ? '${{ inputs.enable_code_scanning }}' === 'true' : '${{ steps.parse_issue.outputs.enable_code_scanning }}' === 'true';
+            const enableDependabotAlerts = '${{ inputs.enable_dependabot_alerts }}' !== '' && '${{ inputs.enable_dependabot_alerts }}' !== 'false' ? '${{ inputs.enable_dependabot_alerts }}' === 'true' : '${{ steps.parse_issue.outputs.enable_dependabot_alerts }}' === 'true';
+            const minRemainingLicenses = '${{ inputs.min_remaining_licenses }}' !== '' && '${{ inputs.min_remaining_licenses }}' !== '1' ? parseInt('${{ inputs.min_remaining_licenses }}') : (parseInt('${{ steps.parse_issue.outputs.min_remaining_licenses }}') || 1);
+            const skipLicenseCheck = '${{ inputs.skip_license_check }}' !== '' && '${{ inputs.skip_license_check }}' !== 'false' ? '${{ inputs.skip_license_check }}' === 'true' : '${{ steps.parse_issue.outputs.skip_license_check }}' === 'true';
+            const dryRun = '${{ inputs.dry_run }}' !== '' && '${{ inputs.dry_run }}' !== 'false' ? '${{ inputs.dry_run }}' === 'true' : '${{ steps.parse_issue.outputs.dry_run }}' === 'true';
+            
+            core.setOutput('repositories', repositories);
+            core.setOutput('enable_secret_scanning', enableSecretScanning);
+            core.setOutput('enable_code_scanning', enableCodeScanning);
+            core.setOutput('enable_dependabot_alerts', enableDependabotAlerts);
+            core.setOutput('min_remaining_licenses', minRemainingLicenses);
+            core.setOutput('skip_license_check', skipLicenseCheck);
+            core.setOutput('dry_run', dryRun);
+      
       - name: Parse config.yaml and group repositories by GHES instance
         id: group_repos
         uses: actions/github-script@v7
@@ -68,14 +113,14 @@ jobs:
           script: |
             const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
             
-            // Get repositories and feature flags from inputs
-            const repositoriesJson = '${{ inputs.repositories }}';
-            const enableSecretScanning = ${{ inputs.enable_secret_scanning }};
-            const enableCodeScanning = ${{ inputs.enable_code_scanning }};
-            const enableDependabotAlerts = ${{ inputs.enable_dependabot_alerts }};
-            const minRemainingLicenses = ${{ inputs.min_remaining_licenses }};
-            const skipLicenseCheck = ${{ inputs.skip_license_check }};
-            const dryRun = ${{ inputs.dry_run }};
+            // Get repositories and feature flags from consolidated config
+            const repositoriesJson = '${{ steps.config_data.outputs.repositories }}';
+            const enableSecretScanning = '${{ steps.config_data.outputs.enable_secret_scanning }}' === 'true';
+            const enableCodeScanning = '${{ steps.config_data.outputs.enable_code_scanning }}' === 'true';
+            const enableDependabotAlerts = '${{ steps.config_data.outputs.enable_dependabot_alerts }}' === 'true';
+            const minRemainingLicenses = parseInt('${{ steps.config_data.outputs.min_remaining_licenses }}');
+            const skipLicenseCheck = '${{ steps.config_data.outputs.skip_license_check }}' === 'true';
+            const dryRun = '${{ steps.config_data.outputs.dry_run }}' === 'true';
             
             // Use helper function to parse config and group repositories
             const matrixItems = helpers.parseConfigAndGroupRepos(
@@ -185,7 +230,7 @@ jobs:
       # Display a message when in dry run mode
       - name: Dry Run Mode - No Changes
         id: dry_run_mode
-        if: steps.check_licenses.outputs.has_enough_licenses == 'true' && steps.check_licenses.outputs.dry_run == 'true'
+        if: steps.check_licenses.outputs.dry_run == 'true'
         env:
           ENTERPRISE_URL: ${{ matrix.api_url }}
           REPOSITORIES: ${{ toJson(matrix.repositories) }}
@@ -193,9 +238,67 @@ jobs:
           echo "🔍 DRY RUN MODE ACTIVE: No changes will be made to repositories. This is only a simulation."
           export GH_ENTERPRISE_TOKEN="${{ secrets[matrix.auth_var] }}"
           
+          # Display license analysis results from the previous step
+          echo ""
+          echo "==============================================="
+          echo "📊 LICENSE ANALYSIS RESULTS"
+          echo "==============================================="
+          echo "Total GHAS licenses: ${{ steps.check_licenses.outputs.total_licenses }}"
+          echo "Currently used licenses: ${{ steps.check_licenses.outputs.used_licenses }}"
+          echo "New committers requiring licenses: ${{ steps.check_licenses.outputs.new_committers }}"
+          echo "Estimated licenses needed: ${{ steps.check_licenses.outputs.estimated_licenses_needed }}"
+          echo "Available licenses after enablement: ${{ steps.check_licenses.outputs.available_licenses }}"
+          echo "Minimum required remaining licenses: ${{ matrix.min_remaining_licenses }}"
+          
+          # Show new committers list if available and not too long
+          if [ -n "${{ steps.check_licenses.outputs.new_committers_list }}" ]; then
+            committers_count=${{ steps.check_licenses.outputs.new_committers }}
+            if [ "$committers_count" -gt 0 ] && [ "$committers_count" -le 10 ]; then
+              echo ""
+              echo "New committers that would require licenses:"
+              echo '${{ steps.check_licenses.outputs.new_committers_list }}' | jq -r '.[]' | while IFS= read -r email; do
+                echo "  - $email"
+              done
+            elif [ "$committers_count" -gt 10 ]; then
+              echo ""
+              echo "New committers: $committers_count (too many to list individually)"
+            fi
+          fi
+          
+          if [ "${{ steps.check_licenses.outputs.skip_license_check }}" = "true" ]; then
+            echo "⚠️ License check was SKIPPED as requested"
+          else
+            if [ "${{ steps.check_licenses.outputs.has_enough_licenses }}" = "true" ]; then
+              echo "✅ SUFFICIENT licenses available for enablement"
+            else
+              echo "❌ INSUFFICIENT licenses available for enablement"
+            fi
+          fi
+          echo "==============================================="
+          echo ""
+          
           # Extract hostname from ENTERPRISE_URL for GitHub CLI
           HOSTNAME=$(echo $ENTERPRISE_URL | sed -E 's|https?://([^/]+)/.*|\1|' | sed 's/api\.//')
           echo "Using hostname: $HOSTNAME"
+          
+          # Check if there are enough licenses before proceeding with repository analysis
+          if [ "${{ steps.check_licenses.outputs.has_enough_licenses }}" = "false" ]; then
+            echo ""
+            echo "⚠️ INSUFFICIENT LICENSES DETECTED"
+            echo "The dry run analysis shows that there are not enough licenses to proceed."
+            echo "No repository analysis will be performed since enablement would fail."
+            echo ""
+            echo "To proceed, you would need to:"
+            echo "1. Purchase additional GHAS licenses, or"
+            echo "2. Adjust the minimum remaining licenses requirement, or"
+            echo "3. Reduce the number of repositories to enable"
+            echo ""
+            echo "✅ Dry run analysis complete"
+            # Set empty outputs for consistency
+            echo "valid_repos=[]" >> $GITHUB_OUTPUT
+            echo "invalid_repos=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           
           # Create files to track valid and invalid repositories
           echo "[]" > valid_repos.json

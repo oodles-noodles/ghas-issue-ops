@@ -5,47 +5,12 @@ on:
     types: [opened]
 
 jobs:
-  parse-issue:
-    if: contains(github.event.issue.labels.*.name, 'ghas-enablement')
-    runs-on: ubuntu-latest
-    outputs:
-      repositories: ${{ steps.parse_issue.outputs.repositories }}
-      enable_secret_scanning: ${{ steps.parse_issue.outputs.enable_secret_scanning }}
-      enable_code_scanning: ${{ steps.parse_issue.outputs.enable_code_scanning }}
-      enable_dependabot_alerts: ${{ steps.parse_issue.outputs.enable_dependabot_alerts }}
-      min_remaining_licenses: ${{ steps.parse_issue.outputs.min_remaining_licenses }}
-      skip_license_check: ${{ steps.parse_issue.outputs.skip_license_check }}
-      dry_run: ${{ steps.parse_issue.outputs.dry_run }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        
-      - name: Install dependencies
-        run: npm install js-yaml
-      
-      - name: Parse issue body
-        id: parse_issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const helpers = require('${{ github.workspace }}/scripts/ghas-helpers.js');
-            const issue = context.payload.issue;
-            return helpers.parseIssueAndSetOutputs(issue, core);
-  
   call-ghas-enablement:
+    if: contains(github.event.issue.labels.*.name, 'ghas-enablement')
     permissions:
       issues: write
       contents: read
-    needs: parse-issue
-    uses: oodles-noodles/ghas-issue-ops/.github/workflows/ghas-enablement-action.yml@main
+    uses: oodles-noodles/ghas-issues-ops/.github/workflows/ghas-enablement-action.yml
     with:
-      repositories: ${{ needs.parse-issue.outputs.repositories }}
-      enable_secret_scanning: ${{ needs.parse-issue.outputs.enable_secret_scanning == 'true' }}
-      enable_code_scanning: ${{ needs.parse-issue.outputs.enable_code_scanning == 'true' }}
-      enable_dependabot_alerts: ${{ needs.parse-issue.outputs.enable_dependabot_alerts == 'true' }}
-      min_remaining_licenses: ${{ fromJSON(needs.parse-issue.outputs.min_remaining_licenses) }}
-      skip_license_check: ${{ needs.parse-issue.outputs.skip_license_check == 'true' }}
-      dry_run: ${{ needs.parse-issue.outputs.dry_run == 'true' }}
       issue_number: ${{ github.event.issue.number }}
     secrets: inherit
-
