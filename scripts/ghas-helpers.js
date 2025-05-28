@@ -37,8 +37,18 @@ function fetchRepoCommitters(repoUrl, token) {
     const cmd = `gh api -H "Accept: application/vnd.github+json" "/repos/${org}/${repo}/commits?since=${sinceDate}&per_page=100" --hostname "${hostname}" --paginate`;
     
     try {
+      // Determine the correct environment variable based on hostname
+      // GitHub.com uses GH_TOKEN, GHES instances use GH_ENTERPRISE_TOKEN
+      const isGitHubDotCom = hostname === 'github.com';
+      const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : 'GH_ENTERPRISE_TOKEN';
+      
+      const execEnv = { 
+        ...process.env,
+        [tokenEnvVar]: token
+      };
+      
       const commitsDataRaw = execSync(cmd, {
-        env: { ...process.env, GH_TOKEN: token },
+        env: execEnv,
         encoding: 'utf8'
       });
       
@@ -142,8 +152,20 @@ function fetchOrganizationRepos(orgUrl, token) {
     
     console.log(`🔍 DEBUG: Executing command: ${cmd}`);
     
+    // Determine the correct environment variable based on hostname
+    // GitHub.com uses GH_TOKEN, GHES instances use GH_ENTERPRISE_TOKEN
+    const isGitHubDotCom = hostname === 'github.com';
+    const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : 'GH_ENTERPRISE_TOKEN';
+    
+    console.log(`🔍 DEBUG: Using environment variable: ${tokenEnvVar} (hostname: ${hostname})`);
+    
+    const execEnv = { 
+      ...process.env,
+      [tokenEnvVar]: token
+    };
+    
     const reposDataRaw = execSync(cmd, {
-      env: { ...process.env, GH_TOKEN: token },
+      env: execEnv,
       encoding: 'utf8'
     });
     
@@ -475,8 +497,14 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = []) {
   
   // Get total and used GHAS licenses from GHEC API
   const licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
+  
+  // Determine the correct environment variable based on hostname
+  // GitHub.com uses GH_TOKEN, GHES instances use GH_ENTERPRISE_TOKEN
+  const isGitHubDotCom = ghecHostname === 'github.com';
+  const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : 'GH_ENTERPRISE_TOKEN';
+  
   const ghasDataRaw = execSync(licenseCmd, { 
-    env: { ...env, GH_TOKEN: ghecToken },
+    env: { ...env, [tokenEnvVar]: ghecToken },
     encoding: 'utf8'
   });
   
