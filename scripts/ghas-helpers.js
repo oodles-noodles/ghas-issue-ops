@@ -631,6 +631,12 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   const totalLicenses = ghasData.purchased_advanced_security_committers;
   const usedLicenses = ghasData.total_advanced_security_committers;
   
+  // Check if this is an unlimited license scenario (0 total licenses indicates unlimited)
+  const isUnlimitedLicenses = totalLicenses === 0;
+  if (isUnlimitedLicenses) {
+    console.log('Total licenses is 0 - treating as unlimited licenses available');
+  }
+  
   // Extract all unique committer emails from repositories that already have GHAS enabled
   const currentGhasCommitters = new Set();
   if (ghasData.repositories && Array.isArray(ghasData.repositories)) {
@@ -649,12 +655,12 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   }
   
   // Create a base license availability assessment
-  const availableLicenses = totalLicenses - usedLicenses;
+  const availableLicenses = isUnlimitedLicenses ? Number.MAX_SAFE_INTEGER : totalLicenses - usedLicenses;
   const minRemainingLicenses = parseInt(env.MIN_REMAINING_LICENSES, 10) || 1;
   
-  console.log(`Total GHAS licenses: ${totalLicenses}`);
+  console.log(`Total GHAS licenses: ${isUnlimitedLicenses ? 'Unlimited' : totalLicenses}`);
   console.log(`Currently used GHAS licenses: ${usedLicenses}`);
-  console.log(`Base available licenses: ${availableLicenses}`);
+  console.log(`Base available licenses: ${isUnlimitedLicenses ? 'Unlimited' : availableLicenses}`);
   console.log(`Min remaining licenses required: ${minRemainingLicenses}`);
   
   // If no repositories are provided for analysis, use the base license check
@@ -665,7 +671,7 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
       usedLicenses,
       availableLicenses,
       minRemainingLicenses,
-      hasEnoughLicenses: availableLicenses > minRemainingLicenses,
+      hasEnoughLicenses: isUnlimitedLicenses || availableLicenses > minRemainingLicenses,
       skipLicenseCheck: false,
       currentGhasCommitters: Array.from(currentGhasCommitters),
       newCommitters: 0,
@@ -704,13 +710,13 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   
   // Final license check including committer analysis
   const estimatedLicensesNeeded = newCommittersCount;
-  const estimatedAvailableLicenses = availableLicenses - estimatedLicensesNeeded;
+  const estimatedAvailableLicenses = isUnlimitedLicenses ? Number.MAX_SAFE_INTEGER : availableLicenses - estimatedLicensesNeeded;
   
   console.log(`Estimated licenses needed: ${estimatedLicensesNeeded}`);
-  console.log(`Estimated available licenses after enablement: ${estimatedAvailableLicenses}`);
+  console.log(`Estimated available licenses after enablement: ${isUnlimitedLicenses ? 'Unlimited' : estimatedAvailableLicenses}`);
   console.log(`Min remaining licenses required: ${minRemainingLicenses}`);
   
-  const hasEnoughLicenses = estimatedAvailableLicenses >= minRemainingLicenses;
+  const hasEnoughLicenses = isUnlimitedLicenses || estimatedAvailableLicenses >= minRemainingLicenses;
   
   return {
     totalLicenses,
