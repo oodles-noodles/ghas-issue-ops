@@ -234,7 +234,20 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
         const token = tokensByHostname[hostname];
         
         if (!token) {
-          console.error(`No token found for hostname ${hostname}`);
+          // Find which auth_var should be used for this hostname
+          const matchingInstance = config.ghes_instances.find(instance => {
+            try {
+              const apiUrl = new URL(instance.api_url);
+              return apiUrl.hostname.replace(/^api\./, '') === hostname;
+            } catch {
+              return false;
+            }
+          });
+          
+          console.error(`❌ No token found for hostname ${hostname}`);
+          console.error(`   Expected environment variable: ${matchingInstance?.auth_var || 'UNKNOWN'}`);
+          console.error(`   This will prevent organization URL expansion for: ${orgUrl}`);
+          console.error(`   Please ensure the token is configured in your workflow secrets.`);
           return;
         }
         
