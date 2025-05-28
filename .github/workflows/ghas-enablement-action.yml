@@ -628,7 +628,6 @@ jobs:
             console.log(`Found ${parsingInvalidRepos.length} total invalid repositories from parsing step`);
             
             // Filter parsing invalid repositories to only include ones for this hostname
-            const currentHostname = '${{ matrix.hostname }}';
             const filteredParsingInvalidRepos = parsingInvalidRepos.filter(item => {
               try {
                 const itemHostname = new URL(item.url).hostname;
