@@ -234,7 +234,11 @@ function isOrganizationUrl(url) {
  * @param {boolean} enableCodeScanning - Whether to enable code scanning
  * @param {boolean} enableDependabotAlerts - Whether to enable dependabot alerts
  * @param {number} minRemainingLicenses - Minimum remaining licenses
- * @returns {Array} Matrix items for GitHub Actions
+ * @returns {Object} Object containing:
+ *   - matrixItems: Array of matrix items for GitHub Actions
+ *   - invalidRepositories: Array of invalid repository URLs that were skipped
+ *   - validRepositories: Array of valid repository URLs that will be processed
+ *   - totalRepositories: Total number of input repositories
  */
 function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enableCodeScanning, enableDependabotAlerts, minRemainingLicenses) {
   // Load and parse config.yaml
@@ -339,6 +343,9 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
   
   // Group repositories by hostname
   const groupedRepos = {};
+  const validRepositories = [];
+  const invalidRepositories = [];
+  
   repositories.forEach(repo => {
     try {
       // Extract hostname from repo URL
@@ -347,11 +354,23 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
         groupedRepos[hostname] = [];
       }
       groupedRepos[hostname].push(repo);
+      validRepositories.push(repo);
     } catch (error) {
       console.error(`Invalid repository URL: ${repo}`, error.message);
+      invalidRepositories.push({
+        url: repo,
+        error: error.message
+      });
       // Continue with other repositories
     }
   });
+  
+  if (invalidRepositories.length > 0) {
+    console.log(`Found ${invalidRepositories.length} invalid repository URLs that will be skipped:`);
+    invalidRepositories.forEach(item => console.log(`  - ${item.url}: ${item.error}`));
+  }
+  
+  console.log(`Processing ${validRepositories.length} valid repositories across ${Object.keys(groupedRepos).length} hostnames`);
   
   // Build matrix JSON
   const matrixItems = [];
@@ -411,7 +430,12 @@ function parseConfigAndGroupRepos(repositoriesJson, enableSecretScanning, enable
     }
   }
   
-  return matrixItems;
+  return {
+    matrixItems,
+    invalidRepositories,
+    validRepositories,
+    totalRepositories: repositories.length
+  };
 }
 
 /**

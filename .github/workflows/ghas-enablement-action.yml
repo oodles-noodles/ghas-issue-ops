@@ -127,7 +127,7 @@ jobs:
             const dryRun = '${{ steps.config_data.outputs.dry_run }}' === 'true';
             
             // Use helper function to parse config and group repositories
-            const matrixItems = helpers.parseConfigAndGroupRepos(
+            const result = helpers.parseConfigAndGroupRepos(
               repositoriesJson, 
               enableSecretScanning, 
               enableCodeScanning, 
@@ -135,14 +135,23 @@ jobs:
               minRemainingLicenses
             );
             
+            const { matrixItems, invalidRepositories, validRepositories, totalRepositories } = result;
+            
             // Add skipLicenseCheck and dryRun to each matrix item
             matrixItems.forEach(item => {
               item.skip_license_check = skipLicenseCheck;
               item.dry_run = dryRun;
+              // Add invalid repositories from parsing step to each matrix item
+              item.parsing_invalid_repositories = invalidRepositories;
             });
             
             // Save the matrix JSON for the next job
             core.setOutput('matrix_json', JSON.stringify(matrixItems));
+            
+            // Save invalid repositories for reporting
+            core.setOutput('invalid_repositories', JSON.stringify(invalidRepositories));
+            core.setOutput('valid_repositories', JSON.stringify(validRepositories));
+            core.setOutput('total_repositories', totalRepositories);
 
   enable-ghas-for-instances:
     needs: process-ghas-request
@@ -611,8 +620,20 @@ jobs:
                 console.error('Raw output:', dryRunModeOutput);
               }
             } else {
-              console.log('No invalid repositories data');
+              console.log('No invalid repositories data from enablement/dry-run steps');
             }
+            
+            // Get invalid repositories from the parsing step (if any)
+            const parsingInvalidRepos = ${{ toJson(matrix.parsing_invalid_repositories) }};
+            console.log(`Found ${parsingInvalidRepos.length} invalid repositories from parsing step`);
+            
+            // Combine invalid repositories from parsing and enablement steps
+            let allInvalidRepositories = [...parsingInvalidRepos];
+            if (invalidRepositoriesData && Array.isArray(invalidRepositoriesData)) {
+              allInvalidRepositories = allInvalidRepositories.concat(invalidRepositoriesData);
+            }
+            
+            console.log(`Total invalid repositories to report: ${allInvalidRepositories.length}`);
             
             // Prepare parameters for comment creation
             const params = {
@@ -634,8 +655,8 @@ jobs:
             };
             
             // Add invalid repositories to params if any were detected
-            if (invalidRepositoriesData && invalidRepositoriesData.length > 0) {
-              params.invalidRepositories = invalidRepositoriesData;
+            if (allInvalidRepositories && allInvalidRepositories.length > 0) {
+              params.invalidRepositories = allInvalidRepositories;
             }
             
             // Add new committers list if available
