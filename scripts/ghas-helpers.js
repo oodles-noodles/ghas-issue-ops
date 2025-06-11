@@ -574,7 +574,7 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
     const authEnv = { ...env, [tokenEnvVar]: ghecToken };
     
     // First, authenticate with the token
-    const authCmd = `echo "${ghecToken}" | gh auth login --hostname "${ghecHostname}" --with-token --scopes "manage_billing:enterprise"`;
+    const authCmd = `echo "${ghecToken}" | gh auth login --hostname "${ghecHostname}" --with-token"`;
     execSync(authCmd, { 
       env: authEnv,
       encoding: 'utf8',
