@@ -1,10 +1,10 @@
 # Configuration for GHES instances
 ghes_instances:
   - name: 'github'
-    api_url: 'https://david-wiggs-060b1459dd3ce046c.qaboot.net/api/v3' 
+    api_url: 'https://david-wiggs-0f86059a833cf1ad9.qaboot.net/api/v3' 
     auth_var: 'GHES_API_TOKEN_1'  
   - name: 'github'
-    api_url: 'https://david-wiggs-070bf9a715effa9de.ghe-test.ninja/api/v3'
+    api_url: 'https://david-wiggs-09b13068841475a3c.ghe-test.org/api/v3'
     auth_var: 'GHES_API_TOKEN_2'
 
 # GitHub Enterprise Cloud configuration for license management
