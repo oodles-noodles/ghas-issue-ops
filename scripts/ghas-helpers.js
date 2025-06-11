@@ -574,13 +574,14 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
     const authEnv = { ...env, [tokenEnvVar]: ghecToken };
     
     // First, authenticate with the token
-    const authCmd = `echo "${ghecToken}" | gh auth login --hostname "${ghecHostname}" --with-token"`;
+    const authCmd = `echo "${ghecToken}" | gh auth login --hostname "${ghecHostname}" --with-token`;
     execSync(authCmd, { 
       env: authEnv,
       encoding: 'utf8',
       stdio: 'pipe' // Hide token from logs
     });
     console.log(`Successfully authenticated with ${ghecHostname}`);
+
     
   } catch (authError) {
     console.error(`Failed to authenticate GitHub CLI for billing API access: ${authError.message}`);
