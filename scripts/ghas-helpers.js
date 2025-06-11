@@ -570,6 +570,20 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   let ghasData;
   let licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}" --paginate`;
   
+  // Refresh GitHub CLI authentication with enterprise billing scope
+  try {
+    console.log('Refreshing GitHub CLI authentication with enterprise billing scope...');
+    const authRefreshCmd = `gh auth refresh -h ${ghecHostname} -s manage_billing:enterprise`;
+    execSync(authRefreshCmd, { 
+      env: { ...env, [tokenEnvVar]: ghecToken },
+      encoding: 'utf8'
+    });
+    console.log('Successfully refreshed GitHub CLI authentication');
+  } catch (authError) {
+    console.warn('Warning: Failed to refresh GitHub CLI authentication scope:', authError.message);
+    console.warn('Proceeding with license API call - it may fail if token lacks proper scope');
+  }
+  
   try {
     // First attempt: Try without advanced_security_product parameter
     console.log('Attempting to fetch license data without advanced_security_product parameter...');
