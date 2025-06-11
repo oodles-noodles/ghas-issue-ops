@@ -567,6 +567,26 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   const isGitHubDotCom = ghecHostname === 'github.com';
   const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : ghecAuthVar;
   
+  // Authenticate GitHub CLI with proper scope for billing API access
+  console.log(`Authenticating GitHub CLI for billing API access on ${ghecHostname}...`);
+  try {
+    // Set up environment for GitHub CLI authentication
+    const authEnv = { ...env, [tokenEnvVar]: ghecToken };
+    
+    // First, authenticate with the token
+    const authCmd = `echo "${ghecToken}" | gh auth login --hostname "${ghecHostname}" --with-token --scopes "manage_billing:enterprise"`;
+    execSync(authCmd, { 
+      env: authEnv,
+      encoding: 'utf8',
+      stdio: 'pipe' // Hide token from logs
+    });
+    console.log(`Successfully authenticated with ${ghecHostname}`);
+    
+  } catch (authError) {
+    console.error(`Failed to authenticate GitHub CLI for billing API access: ${authError.message}`);
+    throw new Error(`GitHub CLI authentication failed: ${authError.message}`);
+  }
+  
   let ghasData;
   let licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}" --paginate`;
   
@@ -574,7 +594,7 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
     // First attempt: Try without advanced_security_product parameter
     console.log('Attempting to fetch license data without advanced_security_product parameter...');
     const ghasDataRaw = execSync(licenseCmd, { 
-      env: { ...env, [tokenEnvVar]: ghecToken },
+      env: env, // Use base environment since we're already authenticated
       encoding: 'utf8'
     });
     ghasData = JSON.parse(ghasDataRaw);
@@ -613,7 +633,7 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
       try {
         console.log(`Retrying license API call with advanced_security_product=${advancedSecurityProduct}...`);
         const ghasDataRaw = execSync(licenseCmd, { 
-          env: { ...env, [tokenEnvVar]: ghecToken },
+          env: env, // Use base environment since we're already authenticated
           encoding: 'utf8'
         });
         ghasData = JSON.parse(ghasDataRaw);
