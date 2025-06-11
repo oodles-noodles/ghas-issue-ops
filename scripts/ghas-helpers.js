@@ -574,8 +574,14 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   try {
     console.log('Refreshing GitHub CLI authentication with enterprise billing scope...');
     const authRefreshCmd = `gh auth refresh -h ${ghecHostname} -s manage_billing:enterprise`;
+    
+    // Create environment without GH_TOKEN to avoid conflicts during auth refresh
+    const refreshEnv = { ...env };
+    delete refreshEnv.GH_TOKEN;
+    refreshEnv[tokenEnvVar] = ghecToken;
+    
     execSync(authRefreshCmd, { 
-      env: { ...env, [tokenEnvVar]: ghecToken },
+      env: refreshEnv,
       encoding: 'utf8'
     });
     console.log('Successfully refreshed GitHub CLI authentication');
