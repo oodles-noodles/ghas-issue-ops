@@ -568,7 +568,7 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : ghecAuthVar;
   
   let ghasData;
-  let licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
+  let licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}" --paginate`;
   
   try {
     // First attempt: Try without advanced_security_product parameter
@@ -608,7 +608,7 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
       }
       
       // Retry the API call with the advanced_security_product parameter
-      licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security?advanced_security_product=${advancedSecurityProduct}" --hostname "${ghecHostname}"`;
+      licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security?advanced_security_product=${advancedSecurityProduct}" --hostname "${ghecHostname}" --paginate`;
       
       try {
         console.log(`Retrying license API call with advanced_security_product=${advancedSecurityProduct}...`);
