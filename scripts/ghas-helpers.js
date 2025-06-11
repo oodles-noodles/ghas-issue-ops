@@ -568,75 +568,16 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   const tokenEnvVar = isGitHubDotCom ? 'GH_TOKEN' : ghecAuthVar;
   
   let ghasData;
-  
-  // Helper function to make paginated curl requests to GitHub API
-  function fetchPaginatedData(url, headers) {
-    let allData = [];
-    let currentUrl = url;
-    let page = 1;
-    
-    while (currentUrl) {
-      console.log(`Fetching page ${page} from: ${currentUrl}`);
-      
-      const curlCmd = `curl -s -H "Accept: application/vnd.github+json" ${headers.map(h => `-H "${h}"`).join(' ')} "${currentUrl}"`;
-      
-      try {
-        const response = execSync(curlCmd, { encoding: 'utf8' });
-        const data = JSON.parse(response);
-        
-        // Handle error responses
-        if (data.message) {
-          throw new Error(`API Error: ${data.message}`);
-        }
-        
-        // For billing API, the response structure is different
-        if (page === 1 && !Array.isArray(data)) {
-          // This is likely the main billing response, not a paginated array
-          return data;
-        }
-        
-        if (Array.isArray(data)) {
-          allData = allData.concat(data);
-        } else if (data.repositories && Array.isArray(data.repositories)) {
-          // Handle billing API response with repositories array
-          if (page === 1) {
-            allData = data;
-            allData.repositories = data.repositories;
-          } else {
-            allData.repositories = allData.repositories.concat(data.repositories);
-          }
-        }
-        
-        // Check for next page - simple pagination detection
-        if (Array.isArray(data) && data.length === 100) {
-          page++;
-          const urlObj = new URL(currentUrl);
-          urlObj.searchParams.set('page', page.toString());
-          urlObj.searchParams.set('per_page', '100');
-          currentUrl = urlObj.toString();
-        } else {
-          break;
-        }
-      } catch (error) {
-        throw new Error(`Curl request failed: ${error.message}`);
-      }
-    }
-    
-    return allData;
-  }
+  let licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security" --hostname "${ghecHostname}"`;
   
   try {
     // First attempt: Try without advanced_security_product parameter
     console.log('Attempting to fetch license data without advanced_security_product parameter...');
-    
-    const baseUrl = `https://${ghecHostname}/api/v3/enterprises/${ghecName}/settings/billing/advanced-security`;
-    const headers = [
-      `Authorization: Bearer ${ghecToken}`,
-      `X-GitHub-Api-Version: 2022-11-28`,
-      `User-Agent: GHAS-IssueOps/1.0`
-    ];
-    
-    ghasData = fetchPaginatedData(baseUrl, headers);
+    const ghasDataRaw = execSync(licenseCmd, { 
+      env: { ...env, [tokenEnvVar]: ghecToken },
+      encoding: 'utf8'
+    });
+    ghasData = JSON.parse(ghasDataRaw);
     console.log('Successfully retrieved license data');
   } catch (error) {
     console.log('Initial license API call failed, checking for 422 error...');
@@ -667,11 +608,15 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
       }
       
       // Retry the API call with the advanced_security_product parameter
-      const retryUrl = `https://${ghecHostname}/api/v3/enterprises/${ghecName}/settings/billing/advanced-security?advanced_security_product=${advancedSecurityProduct}`;
+      licenseCmd = `gh api -H "Accept: application/vnd.github+json" "/enterprises/${ghecName}/settings/billing/advanced-security?advanced_security_product=${advancedSecurityProduct}" --hostname "${ghecHostname}"`;
       
       try {
         console.log(`Retrying license API call with advanced_security_product=${advancedSecurityProduct}...`);
-        ghasData = fetchPaginatedData(retryUrl, headers);
+        const ghasDataRaw = execSync(licenseCmd, { 
+          env: { ...env, [tokenEnvVar]: ghecToken },
+          encoding: 'utf8'
+        });
+        ghasData = JSON.parse(ghasDataRaw);
         console.log('Successfully retrieved license data with advanced_security_product parameter');
       } catch (retryError) {
         console.error('Failed to retrieve license data even with advanced_security_product parameter:', retryError.message);
