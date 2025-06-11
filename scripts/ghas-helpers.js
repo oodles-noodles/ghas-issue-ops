@@ -573,20 +573,31 @@ function checkLicenseAvailability(env, skipCheck = false, repositories = [], fea
   // Refresh GitHub CLI authentication with enterprise billing scope
   try {
     console.log('Refreshing GitHub CLI authentication with enterprise billing scope...');
-    const authRefreshCmd = `gh auth refresh -h ${ghecHostname} -s manage_billing:enterprise`;
     
     // Create environment without GH_TOKEN to avoid conflicts during auth refresh
     const refreshEnv = { ...env };
     delete refreshEnv.GH_TOKEN;
     refreshEnv[tokenEnvVar] = ghecToken;
     
+    // First, ensure we're logged in with the correct token
+    console.log('Logging in with token for hostname:', ghecHostname);
+    const loginCmd = `echo "${ghecToken}" | gh auth login --hostname ${ghecHostname} --with-token`;
+    execSync(loginCmd, { 
+      env: refreshEnv,
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+    
+    // Then refresh with the required scopes
+    const authRefreshCmd = `gh auth refresh --hostname ${ghecHostname} --scopes manage_billing:enterprise`;
     execSync(authRefreshCmd, { 
       env: refreshEnv,
       encoding: 'utf8'
     });
-    console.log('Successfully refreshed GitHub CLI authentication');
+    console.log('Successfully refreshed GitHub CLI authentication with enterprise billing scope');
   } catch (authError) {
     console.warn('Warning: Failed to refresh GitHub CLI authentication scope:', authError.message);
+    console.warn('This may be due to token permissions or GitHub CLI version compatibility');
     console.warn('Proceeding with license API call - it may fail if token lacks proper scope');
   }
   
